@@ -1,0 +1,16 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "80:8000"
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./frontend:/app/frontend
+    networks:
+      - khutbabox-network
+
+networks:
+  khutbabox-network:
+    driver: bridge

@@ -1,0 +1,8 @@
+{
+  "name": "KhutbaBox",
+  "short_name": "Khutba",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#06101d",
+  "theme_color": "#c9a84c"
+}

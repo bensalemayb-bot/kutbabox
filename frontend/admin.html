@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#c9a84c">
+  <title>KhutbaBox — Admin</title>
+  <style>
+    /* ── RESET & BASE ── */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #06101d;
+      color: #f5f0e8;
+      min-height: 100vh;
+    }
+
+    /* ── EN-TÊTE ── */
+    header {
+      text-align: center;
+      padding: 28px 20px 18px;
+      border-bottom: 1px solid rgba(201, 168, 76, 0.15);
+    }
+    header h1 {
+      font-size: 22px;
+      font-weight: 300;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: #f5f0e8;
+    }
+    header h1 span { color: #c9a84c; }
+
+    /* ── CONTENEUR ── */
+    main {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 24px 20px;
+    }
+
+    /* ── ÉCRAN LOGIN ── */
+    #ecran-login {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 50vh;
+      gap: 16px;
+    }
+    .login-titre {
+      font-size: 16px;
+      color: rgba(245, 240, 232, 0.6);
+      margin-bottom: 8px;
+    }
+    .login-input {
+      width: 200px;
+      padding: 14px 18px;
+      background: rgba(245, 240, 232, 0.06);
+      border: 1px solid rgba(201, 168, 76, 0.3);
+      border-radius: 10px;
+      color: #f5f0e8;
+      font-size: 22px;
+      text-align: center;
+      letter-spacing: 8px;
+      outline: none;
+    }
+    .login-input:focus {
+      border-color: #c9a84c;
+    }
+    .login-input::placeholder {
+      letter-spacing: 1px;
+      font-size: 14px;
+      color: rgba(245, 240, 232, 0.3);
+    }
+    .login-btn {
+      padding: 12px 40px;
+      background: #c9a84c;
+      color: #06101d;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .login-erreur {
+      color: #ef4444;
+      font-size: 14px;
+      min-height: 20px;
+    }
+
+    /* ── DASHBOARD ── */
+    #ecran-dashboard { display: none; }
+
+    .bloc {
+      background: rgba(245, 240, 232, 0.03);
+      border: 1px solid rgba(201, 168, 76, 0.12);
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 18px;
+    }
+    .bloc-titre {
+      font-size: 13px;
+      color: #c9a84c;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 16px;
+    }
+
+    /* ── BLOC 1 : STATUT SESSION ── */
+    .badge-session {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .badge-session.actif {
+      background: rgba(34, 197, 94, 0.12);
+      border: 1px solid rgba(34, 197, 94, 0.4);
+      color: #22c55e;
+    }
+    .badge-session.inactif {
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #ef4444;
+    }
+    .pastille {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    .badge-session.actif .pastille { background: #22c55e; }
+    .badge-session.inactif .pastille { background: #ef4444; }
+
+    .heure-demarrage {
+      font-size: 13px;
+      color: rgba(245, 240, 232, 0.5);
+      margin-top: 8px;
+    }
+
+    .langues-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 16px 0;
+    }
+    .langue-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(201, 168, 76, 0.08);
+      border: 1px solid rgba(201, 168, 76, 0.2);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .langue-checkbox input {
+      accent-color: #c9a84c;
+      width: 16px;
+      height: 16px;
+    }
+
+    .session-btns {
+      display: flex;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .btn-demarrer {
+      flex: 1;
+      padding: 12px;
+      background: #22c55e;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-demarrer:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+    .btn-stopper {
+      flex: 1;
+      padding: 12px;
+      background: transparent;
+      color: #ef4444;
+      border: 1px solid #ef4444;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-stopper:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+
+    /* ── BLOC 2 : STATISTIQUES ── */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    .stat-card {
+      text-align: center;
+      padding: 14px;
+      background: rgba(245, 240, 232, 0.03);
+      border-radius: 10px;
+    }
+    .stat-valeur {
+      font-size: 36px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: rgba(245, 240, 232, 0.5);
+      margin-top: 4px;
+    }
+
+    /* ── BLOC 3 : GRAPHE LATENCE ── */
+    .graphe-container {
+      display: flex;
+      align-items: flex-end;
+      gap: 4px;
+      height: 100px;
+      padding: 10px 0;
+    }
+    .graphe-barre {
+      flex: 1;
+      min-width: 6px;
+      border-radius: 3px 3px 0 0;
+      transition: height 0.3s, background 0.3s;
+    }
+    .graphe-vide {
+      text-align: center;
+      color: rgba(245, 240, 232, 0.3);
+      font-size: 13px;
+      padding: 30px 0;
+    }
+
+    /* ── BLOC 4 : HISTORIQUE ── */
+    .tableau-container {
+      overflow-x: auto;
+    }
+    .tableau-historique {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .tableau-historique th {
+      text-align: left;
+      padding: 10px 8px;
+      color: #c9a84c;
+      border-bottom: 1px solid rgba(201, 168, 76, 0.2);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .tableau-historique td {
+      padding: 10px 8px;
+      border-bottom: 1px solid rgba(245, 240, 232, 0.05);
+      vertical-align: top;
+    }
+    .tableau-historique .col-arabe {
+      direction: rtl;
+      text-align: right;
+      font-family: 'Traditional Arabic', 'Scheherazade', serif;
+      font-size: 14px;
+    }
+    .tableau-historique .col-latence {
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .tableau-vide {
+      text-align: center;
+      color: rgba(245, 240, 232, 0.3);
+      font-size: 13px;
+      padding: 24px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── EN-TÊTE ── -->
+  <header>
+    <h1><span>KhutbaBox</span> Admin</h1>
+  </header>
+
+  <main>
+
+    <!-- ══════ ÉCRAN LOGIN ══════ -->
+    <div id="ecran-login">
+      <div class="login-titre">Entrez le code PIN</div>
+      <input
+        type="password"
+        class="login-input"
+        id="input-pin"
+        maxlength="6"
+        placeholder="••••••"
+        inputmode="numeric"
+      >
+      <button class="login-btn" id="btn-login">Accéder</button>
+      <div class="login-erreur" id="login-erreur"></div>
+    </div>
+
+    <!-- ══════ ÉCRAN DASHBOARD ══════ -->
+    <div id="ecran-dashboard">
+
+      <!-- BLOC 1 — Statut session -->
+      <div class="bloc">
+        <div class="bloc-titre">Session</div>
+        <div id="badge-session" class="badge-session inactif">
+          <span class="pastille"></span>
+          <span id="badge-texte">ARRÊTÉE</span>
+        </div>
+        <div class="heure-demarrage" id="heure-demarrage"></div>
+
+        <div class="langues-grid" id="langues-grid">
+          <label class="langue-checkbox"><input type="checkbox" value="fr" checked> 🇫🇷 fr</label>
+          <label class="langue-checkbox"><input type="checkbox" value="en" checked> 🇬🇧 en</label>
+          <label class="langue-checkbox"><input type="checkbox" value="tr" checked> 🇹🇷 tr</label>
+          <label class="langue-checkbox"><input type="checkbox" value="ur" checked> 🇵🇰 ur</label>
+          <label class="langue-checkbox"><input type="checkbox" value="wo" checked> 🇸🇳 wo</label>
+          <label class="langue-checkbox"><input type="checkbox" value="ber" checked> 🏔️ ber</label>
+        </div>
+
+        <div class="session-btns">
+          <button class="btn-demarrer" id="btn-demarrer">Démarrer la Khutba</button>
+          <button class="btn-stopper" id="btn-stopper" disabled>Arrêter</button>
+        </div>
+      </div>
+
+      <!-- BLOC 2 — Statistiques temps réel -->
+      <div class="bloc">
+        <div class="bloc-titre">Statistiques</div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-valeur" id="stat-auditeurs">0</div>
+            <div class="stat-label">auditeurs connectés</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-valeur" id="stat-latence" style="color: #22c55e;">0 ms</div>
+            <div class="stat-label">latence moyenne</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BLOC 3 — Graphe latence -->
+      <div class="bloc">
+        <div class="bloc-titre">Latence — 20 dernières mesures</div>
+        <div class="graphe-container" id="graphe-latence">
+          <div class="graphe-vide" style="width:100%;">Aucune donnée</div>
+        </div>
+      </div>
+
+      <!-- BLOC 4 — Historique traductions -->
+      <div class="bloc">
+        <div class="bloc-titre">Historique traductions</div>
+        <div class="tableau-container">
+          <table class="tableau-historique" id="tableau-historique">
+            <thead>
+              <tr>
+                <th>Heure</th>
+                <th>Langue</th>
+                <th>Texte arabe</th>
+                <th>Traduction</th>
+                <th>Latence</th>
+              </tr>
+            </thead>
+            <tbody id="tableau-body">
+              <tr><td colspan="5" class="tableau-vide">Aucune traduction</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <script>
+    /* ============================================================
+       VARIABLES
+       ============================================================ */
+    let pin = '';
+    let intervalStatut = null;
+    let intervalHistorique = null;
+    let historiqueLatences = [];  // 20 dernières mesures
+
+    /* ============================================================
+       ÉLÉMENTS DOM
+       ============================================================ */
+    const ecranLogin = document.getElementById('ecran-login');
+    const ecranDashboard = document.getElementById('ecran-dashboard');
+    const inputPin = document.getElementById('input-pin');
+    const btnLogin = document.getElementById('btn-login');
+    const loginErreur = document.getElementById('login-erreur');
+    const badgeSession = document.getElementById('badge-session');
+    const badgeTexte = document.getElementById('badge-texte');
+    const heureDemarrage = document.getElementById('heure-demarrage');
+    const btnDemarrer = document.getElementById('btn-demarrer');
+    const btnStopper = document.getElementById('btn-stopper');
+    const statAuditeurs = document.getElementById('stat-auditeurs');
+    const statLatence = document.getElementById('stat-latence');
+    const grapheLatence = document.getElementById('graphe-latence');
+    const tableauBody = document.getElementById('tableau-body');
+
+    /* ============================================================
+       LOGIN
+       ============================================================ */
+
+    btnLogin.addEventListener('click', tenterLogin);
+    inputPin.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') tenterLogin();
+    });
+
+    async function tenterLogin() {
+      pin = inputPin.value.trim();
+      if (!pin) return;
+
+      loginErreur.textContent = '';
+
+      try {
+        const res = await fetch('/api/health', {
+          headers: { 'X-Admin-Pin': pin }
+        });
+
+        if (res.ok) {
+          ecranLogin.style.display = 'none';
+          ecranDashboard.style.display = 'block';
+          demarrerPolling();
+        } else {
+          loginErreur.textContent = 'PIN incorrect';
+          inputPin.value = '';
+          inputPin.focus();
+        }
+      } catch (err) {
+        loginErreur.textContent = 'Impossible de contacter le serveur';
+      }
+    }
+
+    /* ============================================================
+       POLLING — Statut (5s) + Historique (10s)
+       ============================================================ */
+
+    function demarrerPolling() {
+      rafraichirStatut();
+      rafraichirHistorique();
+      intervalStatut = setInterval(rafraichirStatut, 5000);
+      intervalHistorique = setInterval(rafraichirHistorique, 10000);
+    }
+
+    // Arrêter le polling si on quitte la page
+    window.addEventListener('beforeunload', () => {
+      clearInterval(intervalStatut);
+      clearInterval(intervalHistorique);
+    });
+
+    /* ============================================================
+       RAFRAÎCHIR LE STATUT — GET /api/status
+       ============================================================ */
+
+    async function rafraichirStatut() {
+      try {
+        const res = await fetch('/api/status');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Badge session
+        const actif = data.session.active;
+        badgeSession.className = 'badge-session ' + (actif ? 'actif' : 'inactif');
+        badgeTexte.textContent = actif ? 'EN DIRECT' : 'ARRÊTÉE';
+
+        // Heure démarrage
+        if (actif && data.session.started_at) {
+          const d = new Date(data.session.started_at);
+          heureDemarrage.textContent = 'Démarré à ' + d.toLocaleTimeString('fr-FR');
+        } else {
+          heureDemarrage.textContent = '';
+        }
+
+        // Boutons
+        btnDemarrer.disabled = actif;
+        btnStopper.disabled = !actif;
+
+        // Statistiques
+        statAuditeurs.textContent = data.clients_connectes;
+
+        const latence = data.latence_moyenne_ms;
+        statLatence.textContent = latence + ' ms';
+        statLatence.style.color = couleurLatence(latence);
+
+        // Graphe latence — ajouter la dernière mesure
+        if (data.derniere_latence_ms !== null && data.derniere_latence_ms !== undefined) {
+          historiqueLatences.push(data.derniere_latence_ms);
+          if (historiqueLatences.length > 20) {
+            historiqueLatences = historiqueLatences.slice(-20);
+          }
+        }
+        dessinerGraphe();
+
+      } catch (err) {
+        // Silencieux — on réessaie dans 5s
+      }
+    }
+
+    /* ============================================================
+       RAFRAÎCHIR L'HISTORIQUE — GET /api/admin/history
+       ============================================================ */
+
+    async function rafraichirHistorique() {
+      try {
+        const res = await fetch('/api/admin/history', {
+          headers: { 'X-Admin-Pin': pin }
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+
+        const items = data.historique || [];
+
+        if (items.length === 0) {
+          tableauBody.innerHTML = '<tr><td colspan="5" class="tableau-vide">Aucune traduction</td></tr>';
+          return;
+        }
+
+        // Afficher les 20 dernières, les plus récentes en haut
+        const recentes = items.slice(-20).reverse();
+
+        tableauBody.innerHTML = recentes.map(item => {
+          const heure = new Date(item.heure).toLocaleTimeString('fr-FR');
+          const couleur = couleurLatence(item.latence_ms);
+          return `<tr>
+            <td>${heure}</td>
+            <td>${item.langue.toUpperCase()}</td>
+            <td class="col-arabe">${item.texte_arabe}</td>
+            <td>${item.traduction}</td>
+            <td class="col-latence" style="color:${couleur}">${item.latence_ms} ms</td>
+          </tr>`;
+        }).join('');
+
+      } catch (err) {
+        // Silencieux
+      }
+    }
+
+    /* ============================================================
+       GRAPHE LATENCE — 20 barres verticales
+       ============================================================ */
+
+    function dessinerGraphe() {
+      if (historiqueLatences.length === 0) {
+        grapheLatence.innerHTML = '<div class="graphe-vide" style="width:100%;">Aucune donnée</div>';
+        return;
+      }
+
+      const max = Math.max(...historiqueLatences, 1);
+
+      grapheLatence.innerHTML = historiqueLatences.map(val => {
+        const hauteur = Math.max((val / max) * 90, 4);
+        const couleur = couleurLatence(val);
+        return `<div class="graphe-barre" style="height:${hauteur}px;background:${couleur};" title="${val} ms"></div>`;
+      }).join('');
+    }
+
+    /* ============================================================
+       COULEUR LATENCE — Vert / Orange / Rouge
+       ============================================================ */
+
+    function couleurLatence(ms) {
+      if (ms < 3000) return '#22c55e';
+      if (ms <= 6000) return '#f59e0b';
+      return '#ef4444';
+    }
+
+    /* ============================================================
+       DÉMARRER / ARRÊTER LA SESSION
+       ============================================================ */
+
+    btnDemarrer.addEventListener('click', async () => {
+      // Récupérer les langues cochées
+      const cases = document.querySelectorAll('#langues-grid input[type="checkbox"]');
+      const languesActives = [];
+      cases.forEach(c => { if (c.checked) languesActives.push(c.value); });
+
+      if (languesActives.length === 0) {
+        alert('Sélectionnez au moins une langue.');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/admin/session/start', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Pin': pin,
+          },
+          body: JSON.stringify({ active_langs: languesActives }),
+        });
+        if (res.ok) rafraichirStatut();
+      } catch (err) {
+        // Silencieux
+      }
+    });
+
+    btnStopper.addEventListener('click', async () => {
+      try {
+        const res = await fetch('/api/admin/session/stop', {
+          method: 'POST',
+          headers: { 'X-Admin-Pin': pin },
+        });
+        if (res.ok) rafraichirStatut();
+      } catch (err) {
+        // Silencieux
+      }
+    });
+  </script>
+
+</body>
+</html>

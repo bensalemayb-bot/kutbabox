@@ -1,0 +1,24 @@
+# Serveur web
+fastapi==0.115.12
+uvicorn==0.34.2
+
+# WebSocket (diffusion audio vers smartphones)
+websockets==15.0.1
+
+# Capture audio depuis le micro USB
+pyaudio==0.2.14
+
+# Transcription arabe (OpenAI Whisper API)
+openai==1.78.1
+
+# Traduction (Claude Haiku via Anthropic)
+anthropic==0.52.0
+
+# Synthèse vocale (appels API ElevenLabs)
+httpx==0.28.1
+
+# Réception de fichiers uploadés (nécessaire pour FastAPI UploadFile)
+python-multipart==0.0.20
+
+# Charger les clés API depuis le fichier .env
+python-dotenv==1.1.0

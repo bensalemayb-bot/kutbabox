@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="fr" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#c9a84c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.json">
+  <title>KhutbaBox — Khutba Live</title>
+  <style>
+    /* ── RESET & BASE ── */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #06101d;
+      color: #f5f0e8;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── EN-TÊTE ── */
+    header {
+      text-align: center;
+      padding: 30px 20px 20px;
+    }
+    header::after {
+      content: '';
+      display: block;
+      width: 120px;
+      height: 3px;
+      background: linear-gradient(90deg, transparent, #c9a84c, transparent);
+      margin: 18px auto 0;
+    }
+    .bismillah {
+      font-family: 'Traditional Arabic', 'Scheherazade', serif;
+      font-size: 28px;
+      color: #c9a84c;
+      line-height: 1.6;
+    }
+    .titre {
+      font-size: 22px;
+      font-weight: 300;
+      letter-spacing: 3px;
+      color: #f5f0e8;
+      margin-top: 4px;
+      text-transform: uppercase;
+    }
+    .mihrab {
+      width: 80px;
+      height: 40px;
+      border: 2px solid #c9a84c;
+      border-bottom: none;
+      border-radius: 80px 80px 0 0;
+      margin: 14px auto 0;
+      opacity: 0.5;
+    }
+
+    /* ── CONTENEUR PRINCIPAL ── */
+    main { padding: 20px; max-width: 440px; margin: 0 auto; }
+
+    /* ── ÉCRAN CHOIX ── */
+    .section-titre {
+      font-size: 14px;
+      color: #c9a84c;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    .grille-langues {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 28px;
+    }
+    .btn-langue, .btn-voix {
+      background: rgba(201, 168, 76, 0.08);
+      border: 1px solid rgba(201, 168, 76, 0.25);
+      border-radius: 10px;
+      color: #f5f0e8;
+      padding: 14px 10px;
+      font-size: 15px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+    }
+    .btn-langue:hover, .btn-voix:hover {
+      border-color: #c9a84c;
+    }
+    .btn-langue.actif, .btn-voix.actif {
+      background: #c9a84c;
+      color: #06101d;
+      border-color: #c9a84c;
+      font-weight: 600;
+    }
+    .grille-voix {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 32px;
+    }
+    .btn-commencer {
+      display: block;
+      width: 100%;
+      padding: 16px;
+      background: #c9a84c;
+      color: #06101d;
+      border: none;
+      border-radius: 12px;
+      font-size: 17px;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: 0.5px;
+      transition: opacity 0.2s;
+    }
+    .btn-commencer:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
+    /* ── ÉCRAN LIVE ── */
+    #ecran-live { display: none; }
+
+    .badge-direct {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(34, 197, 94, 0.12);
+      border: 1px solid rgba(34, 197, 94, 0.4);
+      border-radius: 20px;
+      padding: 6px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #22c55e;
+      margin: 0 auto 24px;
+      text-align: center;
+    }
+    .pastille-verte {
+      width: 8px;
+      height: 8px;
+      background: #22c55e;
+      border-radius: 50%;
+      animation: clignote 1.2s ease-in-out infinite;
+    }
+    @keyframes clignote {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.2; }
+    }
+
+    /* Visualiseur audio */
+    .visualiseur {
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      gap: 5px;
+      height: 50px;
+      margin-bottom: 28px;
+    }
+    .barre {
+      width: 6px;
+      background: #c9a84c;
+      border-radius: 3px;
+      height: 4px;
+      transition: height 0.15s;
+    }
+    .barre.anime { animation: rebond var(--duree) ease-in-out infinite; }
+    @keyframes rebond {
+      0%, 100% { height: 8px; }
+      50% { height: var(--hauteur); }
+    }
+
+    /* Zone traduction */
+    .zone-traduction {
+      background: rgba(245, 240, 232, 0.04);
+      border: 1px solid rgba(201, 168, 76, 0.15);
+      border-radius: 14px;
+      padding: 22px 18px;
+      margin-bottom: 20px;
+      min-height: 120px;
+    }
+    .texte-traduit {
+      font-size: 20px;
+      line-height: 1.6;
+      color: #f5f0e8;
+      margin-bottom: 14px;
+    }
+    .texte-arabe {
+      font-family: 'Traditional Arabic', 'Scheherazade', serif;
+      font-size: 16px;
+      line-height: 1.8;
+      color: #c9a84c;
+      direction: rtl;
+      text-align: right;
+      opacity: 0.8;
+      border-top: 1px solid rgba(201, 168, 76, 0.15);
+      padding-top: 12px;
+    }
+    .placeholder-texte {
+      color: rgba(245, 240, 232, 0.3);
+      font-style: italic;
+      font-size: 15px;
+      text-align: center;
+      padding: 20px 0;
+    }
+
+    .btn-arreter {
+      display: block;
+      width: 100%;
+      padding: 14px;
+      background: transparent;
+      color: #ef4444;
+      border: 1px solid #ef4444;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-arreter:hover {
+      background: rgba(239, 68, 68, 0.1);
+    }
+
+    /* ── MODE CORAN ── */
+    #ecran-coran { display: none; }
+    .coran-contenu {
+      text-align: center;
+      padding: 40px 20px;
+    }
+    .coran-symbole {
+      font-size: 64px;
+      margin-bottom: 20px;
+      animation: pulse-dore 2.5s ease-in-out infinite;
+    }
+    .coran-texte {
+      font-family: 'Traditional Arabic', 'Scheherazade', serif;
+      font-size: 28px;
+      color: #c9a84c;
+      line-height: 1.8;
+      direction: rtl;
+    }
+    .coran-sous-texte {
+      font-size: 14px;
+      color: rgba(245, 240, 232, 0.5);
+      margin-top: 16px;
+    }
+    @keyframes pulse-dore {
+      0%, 100% { text-shadow: 0 0 10px rgba(201, 168, 76, 0.3); }
+      50% { text-shadow: 0 0 30px rgba(201, 168, 76, 0.7), 0 0 60px rgba(201, 168, 76, 0.3); }
+    }
+
+    /* ── UTILITAIRES ── */
+    .cache { display: none !important; }
+    .centre { text-align: center; }
+  </style>
+</head>
+<body>
+
+  <!-- ── EN-TÊTE ── -->
+  <header>
+    <div class="bismillah">بسم الله الرحمن الرحيم</div>
+    <div class="titre">Khutba Live</div>
+    <div class="mihrab"></div>
+  </header>
+
+  <main>
+
+    <!-- ── ÉCRAN 1 : CHOIX ── -->
+    <div id="ecran-choix">
+
+      <p class="section-titre">Choisissez votre langue</p>
+      <div class="grille-langues">
+        <button class="btn-langue" data-lang="fr">🇫🇷 Français</button>
+        <button class="btn-langue" data-lang="en">🇬🇧 English</button>
+        <button class="btn-langue" data-lang="tr">🇹🇷 Türkçe</button>
+        <button class="btn-langue" data-lang="ur">🇵🇰 اردو</button>
+        <button class="btn-langue" data-lang="wo">🇸🇳 Wolof</button>
+        <button class="btn-langue" data-lang="ber">🏔️ Tamazight</button>
+      </div>
+
+      <p class="section-titre">Choisissez la voix</p>
+      <div class="grille-voix">
+        <button class="btn-voix" data-voix="male">🔊 Homme</button>
+        <button class="btn-voix" data-voix="female">🔊 Femme</button>
+      </div>
+
+      <button class="btn-commencer" id="btn-commencer" disabled>
+        Commencer l'écoute
+      </button>
+    </div>
+
+    <!-- ── ÉCRAN 2 : LIVE ── -->
+    <div id="ecran-live">
+
+      <div class="centre">
+        <div class="badge-direct">
+          <span class="pastille-verte"></span>
+          EN DIRECT
+        </div>
+      </div>
+
+      <div class="visualiseur" id="visualiseur">
+        <div class="barre" style="--hauteur: 35px; --duree: 0.5s;"></div>
+        <div class="barre" style="--hauteur: 50px; --duree: 0.7s;"></div>
+        <div class="barre" style="--hauteur: 40px; --duree: 0.4s;"></div>
+        <div class="barre" style="--hauteur: 48px; --duree: 0.6s;"></div>
+        <div class="barre" style="--hauteur: 30px; --duree: 0.55s;"></div>
+      </div>
+
+      <div class="zone-traduction" id="zone-traduction">
+        <div class="placeholder-texte" id="placeholder">
+          En attente de la parole de l'imam...
+        </div>
+        <div class="texte-traduit cache" id="texte-traduit"></div>
+        <div class="texte-arabe cache" id="texte-arabe"></div>
+      </div>
+
+      <button class="btn-arreter" id="btn-arreter">Arrêter</button>
+    </div>
+
+    <!-- ── ÉCRAN CORAN ── -->
+    <div id="ecran-coran">
+      <div class="coran-contenu">
+        <div class="coran-symbole">☪️</div>
+        <div class="coran-texte">تلاوة القرآن الكريم</div>
+        <div class="coran-sous-texte">Récitation du Saint Coran en cours</div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    /* ============================================================
+       VARIABLES GLOBALES
+       ============================================================ */
+    let langueChoisie = null;
+    let voixChoisie = null;
+    let ws = null;
+    let fileAudio = [];       // file d'attente des morceaux MP3
+    let enLecture = false;    // un audio est-il en cours de lecture ?
+    let modeCoran = false;
+
+    /* ============================================================
+       ÉLÉMENTS DU DOM
+       ============================================================ */
+    const ecranChoix = document.getElementById('ecran-choix');
+    const ecranLive = document.getElementById('ecran-live');
+    const ecranCoran = document.getElementById('ecran-coran');
+    const btnCommencer = document.getElementById('btn-commencer');
+    const btnArreter = document.getElementById('btn-arreter');
+    const placeholder = document.getElementById('placeholder');
+    const texteTraduit = document.getElementById('texte-traduit');
+    const texteArabe = document.getElementById('texte-arabe');
+    const visualiseur = document.getElementById('visualiseur');
+    const barres = visualiseur.querySelectorAll('.barre');
+
+    /* ============================================================
+       ÉCRAN 1 — SÉLECTION LANGUE ET VOIX
+       ============================================================ */
+
+    // Sélection langue
+    document.querySelectorAll('.btn-langue').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.btn-langue').forEach(b => b.classList.remove('actif'));
+        btn.classList.add('actif');
+        langueChoisie = btn.dataset.lang;
+        verifierPret();
+      });
+    });
+
+    // Sélection voix
+    document.querySelectorAll('.btn-voix').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.btn-voix').forEach(b => b.classList.remove('actif'));
+        btn.classList.add('actif');
+        voixChoisie = btn.dataset.voix;
+        verifierPret();
+      });
+    });
+
+    function verifierPret() {
+      btnCommencer.disabled = !(langueChoisie && voixChoisie);
+    }
+
+    /* ============================================================
+       CONNEXION WEBSOCKET
+       ============================================================ */
+
+    btnCommencer.addEventListener('click', () => {
+      const protocole = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = `${protocole}//${window.location.host}/ws/listen`;
+
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        // Envoyer les préférences du fidèle
+        ws.send(JSON.stringify({ lang: langueChoisie, voice: voixChoisie }));
+        // Basculer vers l'écran live
+        ecranChoix.style.display = 'none';
+        ecranLive.style.display = 'block';
+        demarrerVisualiseur();
+      };
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'coran') {
+          activerModeCoran();
+        } else if (data.type === 'traduction') {
+          if (modeCoran) {
+            desactiverModeCoran();
+          }
+          afficherTraduction(data.traduction, data.texte_arabe);
+          if (data.audio_base64) {
+            fileAudio.push(data.audio_base64);
+            jouerSuivant();
+          }
+        }
+      };
+
+      ws.onclose = () => {
+        arreterEcoute();
+      };
+
+      ws.onerror = () => {
+        arreterEcoute();
+      };
+    });
+
+    /* ============================================================
+       AFFICHAGE TRADUCTION
+       ============================================================ */
+
+    function afficherTraduction(traduction, arabe) {
+      placeholder.classList.add('cache');
+      texteTraduit.classList.remove('cache');
+      texteArabe.classList.remove('cache');
+      texteTraduit.textContent = traduction;
+      texteArabe.textContent = arabe;
+    }
+
+    /* ============================================================
+       FILE D'ATTENTE AUDIO — Évite les chevauchements
+       ============================================================ */
+
+    function jouerSuivant() {
+      if (enLecture || fileAudio.length === 0) return;
+
+      enLecture = true;
+      const base64 = fileAudio.shift();
+
+      // Décoder le base64 en blob MP3
+      const octets = atob(base64);
+      const tableau = new Uint8Array(octets.length);
+      for (let i = 0; i < octets.length; i++) {
+        tableau[i] = octets.charCodeAt(i);
+      }
+      const blob = new Blob([tableau], { type: 'audio/mpeg' });
+      const url = URL.createObjectURL(blob);
+
+      const audio = new Audio(url);
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        enLecture = false;
+        jouerSuivant();
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        enLecture = false;
+        jouerSuivant();
+      };
+      audio.play();
+    }
+
+    /* ============================================================
+       MODE CORAN
+       ============================================================ */
+
+    function activerModeCoran() {
+      modeCoran = true;
+      fileAudio = [];
+      enLecture = false;
+      ecranLive.style.display = 'none';
+      ecranCoran.style.display = 'block';
+    }
+
+    function desactiverModeCoran() {
+      modeCoran = false;
+      ecranCoran.style.display = 'none';
+      ecranLive.style.display = 'block';
+      placeholder.classList.remove('cache');
+      texteTraduit.classList.add('cache');
+      texteArabe.classList.add('cache');
+    }
+
+    /* ============================================================
+       VISUALISEUR AUDIO — Barres animées
+       ============================================================ */
+
+    function demarrerVisualiseur() {
+      barres.forEach(b => b.classList.add('anime'));
+    }
+
+    function arreterVisualiseur() {
+      barres.forEach(b => {
+        b.classList.remove('anime');
+        b.style.height = '4px';
+      });
+    }
+
+    /* ============================================================
+       ARRÊTER L'ÉCOUTE — Retour à l'écran choix
+       ============================================================ */
+
+    btnArreter.addEventListener('click', () => {
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+      arreterEcoute();
+    });
+
+    function arreterEcoute() {
+      fileAudio = [];
+      enLecture = false;
+      modeCoran = false;
+      arreterVisualiseur();
+      placeholder.classList.remove('cache');
+      texteTraduit.classList.add('cache');
+      texteArabe.classList.add('cache');
+      ecranLive.style.display = 'none';
+      ecranCoran.style.display = 'none';
+      ecranChoix.style.display = 'block';
+    }
+  </script>
+
+</body>
+</html>

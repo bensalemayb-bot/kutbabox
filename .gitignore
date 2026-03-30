@@ -1,0 +1,9 @@
+# Clés API secrètes — NE JAMAIS PUSH
+.env
+
+# Python
+__pycache__/
+*.pyc
+
+# Docker
+.docker/

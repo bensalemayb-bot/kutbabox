@@ -122,6 +122,13 @@
     /* ── ÉCRAN LIVE ── */
     #ecran-live { display: none; }
 
+    .badges-live {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
     .badge-direct {
       display: inline-flex;
       align-items: center;
@@ -133,8 +140,6 @@
       font-size: 13px;
       font-weight: 600;
       color: #22c55e;
-      margin: 0 auto 24px;
-      text-align: center;
     }
     .pastille-verte {
       width: 8px;
@@ -142,6 +147,25 @@
       background: #22c55e;
       border-radius: 50%;
       animation: clignote 1.2s ease-in-out infinite;
+    }
+    .badge-mode {
+      display: inline-flex;
+      border-radius: 20px;
+      padding: 6px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .badge-mode.azure {
+      background: rgba(59, 130, 246, 0.15);
+      border: 1px solid rgba(59, 130, 246, 0.4);
+      color: #60a5fa;
+    }
+    .badge-mode.legacy {
+      background: rgba(234, 179, 8, 0.15);
+      border: 1px solid rgba(234, 179, 8, 0.4);
+      color: #facc15;
     }
     @keyframes clignote {
       0%, 100% { opacity: 1; }
@@ -170,7 +194,7 @@
       50% { height: var(--hauteur); }
     }
 
-    /* Zone traduction */
+    /* ── Zone traduction — sous-titres live ── */
     .zone-traduction {
       background: rgba(245, 240, 232, 0.04);
       border: 1px solid rgba(201, 168, 76, 0.15);
@@ -179,22 +203,34 @@
       margin-bottom: 20px;
       min-height: 120px;
     }
-    .texte-traduit {
+    .texte-partiel {
+      font-size: 18px;
+      line-height: 1.6;
+      color: rgba(245, 240, 232, 0.5);
+      font-style: italic;
+      padding-bottom: 14px;
+      border-bottom: 1px solid rgba(201, 168, 76, 0.1);
+      margin-bottom: 14px;
+    }
+    .historique {
+      max-height: 300px;
+      overflow-y: auto;
+      scroll-behavior: smooth;
+    }
+    .phrase-finale {
+      padding-bottom: 14px;
+      margin-bottom: 14px;
+      border-bottom: 1px solid rgba(201, 168, 76, 0.08);
+    }
+    .phrase-finale:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+    .phrase-texte {
       font-size: 20px;
       line-height: 1.6;
       color: #f5f0e8;
-      margin-bottom: 14px;
-    }
-    .texte-arabe {
-      font-family: 'Traditional Arabic', 'Scheherazade', serif;
-      font-size: 16px;
-      line-height: 1.8;
-      color: #c9a84c;
-      direction: rtl;
-      text-align: right;
-      opacity: 0.8;
-      border-top: 1px solid rgba(201, 168, 76, 0.15);
-      padding-top: 12px;
     }
     .placeholder-texte {
       color: rgba(245, 240, 232, 0.3);
@@ -221,34 +257,6 @@
       background: rgba(239, 68, 68, 0.1);
     }
 
-    /* ── MODE CORAN ── */
-    #ecran-coran { display: none; }
-    .coran-contenu {
-      text-align: center;
-      padding: 40px 20px;
-    }
-    .coran-symbole {
-      font-size: 64px;
-      margin-bottom: 20px;
-      animation: pulse-dore 2.5s ease-in-out infinite;
-    }
-    .coran-texte {
-      font-family: 'Traditional Arabic', 'Scheherazade', serif;
-      font-size: 28px;
-      color: #c9a84c;
-      line-height: 1.8;
-      direction: rtl;
-    }
-    .coran-sous-texte {
-      font-size: 14px;
-      color: rgba(245, 240, 232, 0.5);
-      margin-top: 16px;
-    }
-    @keyframes pulse-dore {
-      0%, 100% { text-shadow: 0 0 10px rgba(201, 168, 76, 0.3); }
-      50% { text-shadow: 0 0 30px rgba(201, 168, 76, 0.7), 0 0 60px rgba(201, 168, 76, 0.3); }
-    }
-
     /* ── UTILITAIRES ── */
     .cache { display: none !important; }
     .centre { text-align: center; }
@@ -272,10 +280,12 @@
       <div class="grille-langues">
         <button class="btn-langue" data-lang="fr">🇫🇷 Français</button>
         <button class="btn-langue" data-lang="en">🇬🇧 English</button>
+        <button class="btn-langue" data-lang="es">🇪🇸 Español</button>
+        <button class="btn-langue" data-lang="pt">🇧🇷 Português</button>
         <button class="btn-langue" data-lang="tr">🇹🇷 Türkçe</button>
         <button class="btn-langue" data-lang="ur">🇵🇰 اردو</button>
-        <button class="btn-langue" data-lang="wo">🇸🇳 Wolof</button>
-        <button class="btn-langue" data-lang="ber">🏔️ Tamazight</button>
+        <button class="btn-langue" data-lang="bs">🇧🇦 Bosanski</button>
+        <button class="btn-langue" data-lang="sq">🇦🇱 Shqip</button>
       </div>
 
       <p class="section-titre">Choisissez la voix</p>
@@ -292,11 +302,12 @@
     <!-- ── ÉCRAN 2 : LIVE ── -->
     <div id="ecran-live">
 
-      <div class="centre">
+      <div class="badges-live">
         <div class="badge-direct">
           <span class="pastille-verte"></span>
           EN DIRECT
         </div>
+        <div class="badge-mode legacy" id="badge-mode">Legacy</div>
       </div>
 
       <div class="visualiseur" id="visualiseur">
@@ -308,23 +319,15 @@
       </div>
 
       <div class="zone-traduction" id="zone-traduction">
-        <div class="placeholder-texte" id="placeholder">
-          En attente de la parole de l'imam...
+        <div class="texte-partiel cache" id="texte-partiel"></div>
+        <div class="historique" id="historique">
+          <div class="placeholder-texte" id="placeholder">
+            En attente de la parole de l'imam...
+          </div>
         </div>
-        <div class="texte-traduit cache" id="texte-traduit"></div>
-        <div class="texte-arabe cache" id="texte-arabe"></div>
       </div>
 
       <button class="btn-arreter" id="btn-arreter">Arrêter</button>
-    </div>
-
-    <!-- ── ÉCRAN CORAN ── -->
-    <div id="ecran-coran">
-      <div class="coran-contenu">
-        <div class="coran-symbole">☪️</div>
-        <div class="coran-texte">تلاوة القرآن الكريم</div>
-        <div class="coran-sous-texte">Récitation du Saint Coran en cours</div>
-      </div>
     </div>
 
   </main>
@@ -336,21 +339,25 @@
     let langueChoisie = null;
     let voixChoisie = null;
     let ws = null;
-    let fileAudio = [];       // file d'attente des morceaux MP3
-    let enLecture = false;    // un audio est-il en cours de lecture ?
-    let modeCoran = false;
+    let audioCtx = null;        // AudioContext pour unlock mobile
+    let modeBackend = 'legacy'; // azure ou legacy
+    const MAX_HISTORIQUE = 10;  // nombre max de phrases affichées
+
+    // Audio queue (Blob URL player)
+    const audioQueue = [];
+    let isPlaying = false;
 
     /* ============================================================
        ÉLÉMENTS DU DOM
        ============================================================ */
     const ecranChoix = document.getElementById('ecran-choix');
     const ecranLive = document.getElementById('ecran-live');
-    const ecranCoran = document.getElementById('ecran-coran');
     const btnCommencer = document.getElementById('btn-commencer');
     const btnArreter = document.getElementById('btn-arreter');
     const placeholder = document.getElementById('placeholder');
-    const texteTraduit = document.getElementById('texte-traduit');
-    const texteArabe = document.getElementById('texte-arabe');
+    const textePartiel = document.getElementById('texte-partiel');
+    const historiqueDiv = document.getElementById('historique');
+    const badgeMode = document.getElementById('badge-mode');
     const visualiseur = document.getElementById('visualiseur');
     const barres = visualiseur.querySelectorAll('.barre');
 
@@ -387,110 +394,138 @@
        ============================================================ */
 
     btnCommencer.addEventListener('click', () => {
+      // Débloquer l'audio sur mobile — le clic utilisateur autorise l'AudioContext
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      audioCtx.resume();
+      const silentBuffer = audioCtx.createBuffer(1, 1, 22050);
+      const source = audioCtx.createBufferSource();
+      source.buffer = silentBuffer;
+      source.connect(audioCtx.destination);
+      source.start();
+
       const protocole = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const url = `${protocole}//${window.location.host}/ws/listen`;
 
       ws = new WebSocket(url);
 
       ws.onopen = () => {
-        // Envoyer les préférences du fidèle
         ws.send(JSON.stringify({ lang: langueChoisie, voice: voixChoisie }));
-        // Basculer vers l'écran live
         ecranChoix.style.display = 'none';
         ecranLive.style.display = 'block';
         demarrerVisualiseur();
       };
 
       ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-
-        if (data.type === 'coran') {
-          activerModeCoran();
-        } else if (data.type === 'traduction') {
-          if (modeCoran) {
-            desactiverModeCoran();
-          }
-          afficherTraduction(data.traduction, data.texte_arabe);
-          if (data.audio_base64) {
-            fileAudio.push(data.audio_base64);
-            jouerSuivant();
-          }
+        const msg = JSON.parse(event.data);
+        switch (msg.type) {
+          case 'status':
+            modeBackend = msg.mode || 'legacy';
+            mettreAJourBadgeMode();
+            break;
+          case 'partial':
+            afficherPartiel(msg.text);
+            break;
+          case 'final_text':
+            afficherFinal(msg.text);
+            break;
+          case 'audio_chunk':
+            jouerAudio(msg.data, msg.format || 'mp3');
+            break;
+          case 'traduction':
+            // Rétrocompatibilité pipeline Legacy
+            afficherFinal(msg.traduction);
+            if (msg.audio_base64) {
+              jouerAudio(msg.audio_base64, msg.audio_format || 'mp3');
+            }
+            break;
         }
       };
 
-      ws.onclose = () => {
-        arreterEcoute();
-      };
-
-      ws.onerror = () => {
-        arreterEcoute();
-      };
+      ws.onclose = () => { arreterEcoute(); };
+      ws.onerror = () => { arreterEcoute(); };
     });
 
     /* ============================================================
-       AFFICHAGE TRADUCTION
+       BADGE MODE (Azure / Legacy)
        ============================================================ */
 
-    function afficherTraduction(traduction, arabe) {
-      placeholder.classList.add('cache');
-      texteTraduit.classList.remove('cache');
-      texteArabe.classList.remove('cache');
-      texteTraduit.textContent = traduction;
-      texteArabe.textContent = arabe;
+    function mettreAJourBadgeMode() {
+      badgeMode.textContent = modeBackend === 'azure' ? 'Azure' : 'Legacy';
+      badgeMode.className = 'badge-mode ' + (modeBackend === 'azure' ? 'azure' : 'legacy');
     }
 
     /* ============================================================
-       FILE D'ATTENTE AUDIO — Évite les chevauchements
+       AFFICHAGE — Sous-titres live
        ============================================================ */
 
-    function jouerSuivant() {
-      if (enLecture || fileAudio.length === 0) return;
+    function afficherPartiel(text) {
+      if (!text) return;
+      placeholder.classList.add('cache');
+      textePartiel.textContent = text;
+      textePartiel.classList.remove('cache');
+    }
 
-      enLecture = true;
-      const base64 = fileAudio.shift();
+    function afficherFinal(text) {
+      if (!text) return;
+      placeholder.classList.add('cache');
 
-      // Décoder le base64 en blob MP3
-      const octets = atob(base64);
-      const tableau = new Uint8Array(octets.length);
-      for (let i = 0; i < octets.length; i++) {
-        tableau[i] = octets.charCodeAt(i);
+      // Masquer le texte partiel
+      textePartiel.classList.add('cache');
+      textePartiel.textContent = '';
+
+      // Créer un bloc phrase finale
+      const phrase = document.createElement('div');
+      phrase.className = 'phrase-finale';
+      const texte = document.createElement('div');
+      texte.className = 'phrase-texte';
+      texte.textContent = text;
+      phrase.appendChild(texte);
+      historiqueDiv.appendChild(phrase);
+
+      // Limiter l'historique
+      const phrases = historiqueDiv.querySelectorAll('.phrase-finale');
+      while (phrases.length > MAX_HISTORIQUE) {
+        historiqueDiv.removeChild(phrases[0]);
+        // Re-query after removal
+        break;
       }
-      const blob = new Blob([tableau], { type: 'audio/mpeg' });
+
+      // Scroll auto vers le bas
+      historiqueDiv.scrollTop = historiqueDiv.scrollHeight;
+    }
+
+    /* ============================================================
+       AUDIO PLAYER — Blob URL (compatible mp3 + wav)
+       ============================================================ */
+
+    function jouerAudio(base64Data, format) {
+      const mime = format === 'wav' ? 'audio/wav' : 'audio/mpeg';
+      audioQueue.push({ data: base64Data, mime: mime });
+      if (!isPlaying) jouerProchain();
+    }
+
+    function jouerProchain() {
+      if (audioQueue.length === 0) {
+        isPlaying = false;
+        return;
+      }
+      isPlaying = true;
+      const { data, mime } = audioQueue.shift();
+
+      const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
+      const blob = new Blob([bytes], { type: mime });
       const url = URL.createObjectURL(blob);
 
       const audio = new Audio(url);
       audio.onended = () => {
         URL.revokeObjectURL(url);
-        enLecture = false;
-        jouerSuivant();
+        jouerProchain();
       };
       audio.onerror = () => {
         URL.revokeObjectURL(url);
-        enLecture = false;
-        jouerSuivant();
+        jouerProchain();
       };
-      audio.play();
-    }
-
-    /* ============================================================
-       MODE CORAN
-       ============================================================ */
-
-    function activerModeCoran() {
-      modeCoran = true;
-      fileAudio = [];
-      enLecture = false;
-      ecranLive.style.display = 'none';
-      ecranCoran.style.display = 'block';
-    }
-
-    function desactiverModeCoran() {
-      modeCoran = false;
-      ecranCoran.style.display = 'none';
-      ecranLive.style.display = 'block';
-      placeholder.classList.remove('cache');
-      texteTraduit.classList.add('cache');
-      texteArabe.classList.add('cache');
+      audio.play().catch(() => jouerProchain());
     }
 
     /* ============================================================
@@ -521,15 +556,17 @@
     });
 
     function arreterEcoute() {
-      fileAudio = [];
-      enLecture = false;
-      modeCoran = false;
+      audioQueue.length = 0;
+      isPlaying = false;
       arreterVisualiseur();
+      // Réinitialiser la zone traduction
+      textePartiel.classList.add('cache');
+      textePartiel.textContent = '';
+      historiqueDiv.innerHTML = '';
       placeholder.classList.remove('cache');
-      texteTraduit.classList.add('cache');
-      texteArabe.classList.add('cache');
+      historiqueDiv.appendChild(placeholder);
+      // Retour à l'écran choix
       ecranLive.style.display = 'none';
-      ecranCoran.style.display = 'none';
       ecranChoix.style.display = 'block';
     }
   </script>

@@ -1,4 +1,5 @@
 # KhutbaBox — Guide pour Claude Code
+> Dernière mise à jour : 2026-04-02
 
 ## C'est quoi ce projet
 Système de traduction en temps réel des sermons de mosquée.
@@ -20,16 +21,18 @@ Projet développé par Boualem — IA Factory — Genève.
 ## Stack technique
 - Backend : Python + FastAPI (backend/main.py)
 - Frontend : HTML/JS (frontend/index.html et admin.html)
-- Capture audio : PyAudio (micro branché en USB)
-- IA transcription : OpenAI Whisper (comprend l'arabe)
-- IA traduction : Claude Haiku (traduit le texte)
-- IA voix : ElevenLabs (lit la traduction à voix haute)
+- Capture audio : sounddevice (Windows) / PyAudio (Linux/Docker), streaming WebSocket ~100ms
+- IA transcription + traduction : Azure Speech Translation SDK (STT arabe + traduction simultanée, streaming)
+- IA voix : ElevenLabs Flash v2.5 (5 langues) + Azure Neural TTS (3 langues)
+- Fallback : OpenAI Whisper (STT) + Google Gemini Flash (traduction) — gardés jusqu'à validation Azure
 - Infrastructure : Docker Compose
 
 ## Clés API nécessaires (dans le fichier .env)
-- OPENAI_API_KEY : pour Whisper
-- ANTHROPIC_API_KEY : pour Claude traduction
-- ELEVENLABS_API_KEY : pour la voix
+- AZURE_SPEECH_KEY : pour Azure Speech Translation (STT + traduction + TTS 3 langues)
+- AZURE_SPEECH_REGION : westeurope
+- ELEVENLABS_API_KEY : pour ElevenLabs Flash v2.5 (TTS 5 langues)
+- OPENAI_API_KEY : pour Whisper (fallback STT uniquement)
+- GEMINI_API_KEY : pour Gemini (fallback traduction uniquement)
 - ADMIN_PIN : code secret dashboard admin
 - MOSQUE_NAME : nom de la mosquée
 
@@ -49,47 +52,37 @@ Projet développé par Boualem — IA Factory — Genève.
 ### Déjà fait ✅
 - Structure des dossiers créée
 - CLAUDE.md créé et mis à jour
-- backend/requirements.txt rempli
 - backend/main.py écrit et corrigé
+- backend/requirements.txt rempli (sounddevice remplace pyaudio sur Windows)
+- backend/Dockerfile écrit
+- docker-compose.yml écrit
+- frontend/index.html écrit (page PWA fidèles)
+- frontend/admin.html écrit (dashboard admin)
+- scripts/audio_capture.py écrit (capture micro avec sounddevice)
+- display/lcd_status.py écrit
+- scripts/setup.sh écrit
+- Docker tourne sur http://localhost
 
 ### À faire dans cet ordre exact
 
-ÉTAPE 1 — docker-compose.yml (prochaine étape)
-Lance tout le projet en une seule commande.
-Sans ce fichier Docker ne sait pas quoi faire.
-
-ÉTAPE 2 — backend/Dockerfile
-Recette pour construire le conteneur Python.
-Dit à Docker comment installer Python
-et les dépendances du requirements.txt
-
-ÉTAPE 3 — frontend/index.html
-Page PWA que les fidèles ouvrent sur leur téléphone.
-Choix langue + voix + lecture audio temps réel.
-Se connecte au WebSocket /ws/listen du backend.
-
-ÉTAPE 4 — frontend/admin.html
-Dashboard responsable mosquée.
-Start/stop session, monitoring latence, historique.
-Protégé par PIN via header X-Admin-Pin.
-
-ÉTAPE 5 — .env
-Remplacer les fausses clés par les vraies clés API
-OpenAI, Anthropic, ElevenLabs.
-
-ÉTAPE 6 — Premier test local
+ÉTAPE 1 — Tester le MVP complet (prochaine étape)
 Lancer docker compose up --build
-Tester sur téléphone via http://IP-ordinateur
-Vérifier que la page s'ouvre.
+Ouvrir http://localhost sur le navigateur
+Vérifier que les pages fidèles et admin s'affichent.
+Tester le script audio_capture.py sur Windows.
 
-ÉTAPE 7 — Test audio complet
+ÉTAPE 2 — Mettre les vraies clés API dans .env
+Remplacer les fausses clés par les vraies clés API :
+Azure Speech, ElevenLabs, OpenAI (fallback), Gemini (fallback).
+
+ÉTAPE 3 — Test audio complet
 Simuler un vrai sermon avec audio arabe.
-Vérifier détection Coran, traduction, voix.
+Vérifier traduction streaming et voix sur les 8 langues.
 
-ÉTAPE 8 — Corrections
+ÉTAPE 4 — Corrections
 Corriger ce qui ne marche pas.
 
-ÉTAPE 9 — Transfert Raspberry Pi
+ÉTAPE 5 — Transfert Raspberry Pi
 Copier le projet sur le Raspberry Pi.
 Lancer le script setup.sh
 
@@ -97,3 +90,84 @@ Lancer le script setup.sh
 Toujours suivre cet ordre sans sauter d'étape.
 Valider que chaque étape fonctionne avant
 de passer à la suivante.
+
+## Migration v2 — Architecture Pro
+
+### Nouveau pipeline audio (remplace l'ancien)
+```
+Micro → WebSocket streaming (chunks ~100ms, PCM 16kHz 16-bit mono)
+    → Azure Speech Translation SDK (STT arabe + traduction simultanée)
+        → recognizing (texte partiel → WebSocket smartphones)
+        → recognized (phrase complète → TTS → WebSocket smartphones)
+```
+- Latence cible : < 2 secondes (ancien pipeline : 5-6 secondes)
+- Azure Speech Translation fait STT + traduction en un seul appel streaming
+- SDK Python : `azure-cognitiveservices-speech` (>=1.40.0)
+- Région Azure : westeurope
+- Fallback : Whisper + Gemini maintenus jusqu'à validation complète d'Azure
+
+### Les 8 langues cibles
+
+| # | Langue | Code | Code Azure target | TTS Provider |
+|---|--------|------|--------------------|--------------|
+| 1 | Français | fr | fr | ElevenLabs Flash v2.5 |
+| 2 | English | en | en | ElevenLabs Flash v2.5 |
+| 3 | Español | es | es | ElevenLabs Flash v2.5 |
+| 4 | Português | pt | pt | ElevenLabs Flash v2.5 |
+| 5 | Türkçe | tr | tr | ElevenLabs Flash v2.5 |
+| 6 | Urdu | ur | ur | Azure Neural TTS (ur-PK) |
+| 7 | Bosanski | bs | bs | Azure Neural TTS (bs-BA) |
+| 8 | Shqip (Albanais) | sq | sq | Azure Neural TTS (sq-AL) |
+
+### Stratégie TTS hybride
+- 5 langues via ElevenLabs Flash v2.5 (model_id: `eleven_flash_v2_5`) → ~75ms latence
+- 3 langues via Azure Neural TTS (inclus dans l'abonnement Azure Speech) → ~200ms latence
+- Albanais n'est supporté par aucun modèle ElevenLabs → Azure Neural TTS obligatoire
+
+### Détection Coran / Adhan — SUPPRIMÉE du MVP
+La détection Coran et Adhan est **supprimée pour le MVP**. Tout audio capté est traduit sans filtre.
+
+Fonctionnalités reportées à v2 future :
+- Détection intelligente Coran + Adhan
+- Suspension automatique de la traduction pendant les récitations
+- Affichage spécial "Récitation du Coran en cours" sur les smartphones
+
+### Capture audio — streaming WebSocket
+- WebSocket persistant `ws://backend/ws/audio-stream`
+- Micro-frames de ~100ms en PCM 16kHz 16-bit mono
+- Le script `audio_capture.py` garde la détection silence (RMS threshold) mais envoie en continu
+- Remplace l'ancien système de chunks fixes de 5 secondes
+
+### Protocole WebSocket smartphones — 3 types de messages
+```json
+{ "type": "partial", "lang": "fr", "text": "texte partiel..." }
+{ "type": "final_text", "lang": "fr", "text": "phrase complète" }
+{ "type": "audio_chunk", "lang": "fr", "data": "base64..." }
+```
+
+### Dépendances à ajouter (requirements.txt)
+```
+azure-cognitiveservices-speech>=1.40.0
+```
+
+### Coûts mensuels par mosquée
+- Azure Speech Translation : ~$12/mois
+- ElevenLabs Flash v2.5 (5 langues) : ~$15/mois
+- Azure Neural TTS (3 langues) : ~$5/mois
+- Serveur VPS : ~$10/mois
+- **Total : ~$42/mois**
+- Prix vente SaaS Pro 8 langues : 349 CHF/mois
+- Marge : ~88%
+
+### Ordre de migration — 4 phases
+
+**Phase 1** : Azure Speech Translation backend (remplace Whisper + Gemini traduction)
+**Phase 2** : Capture audio streaming (WebSocket remplace POST chunks)
+**Phase 3** : TTS hybride ElevenLabs Flash + Azure Neural (remplace ElevenLabs classique)
+**Phase 4** : Frontend PWA (nouveau protocole WebSocket partial/final/audio_chunk)
+
+Chaque phase est testable indépendamment. Fallback Whisper+Gemini maintenu jusqu'à validation Azure.
+
+**Phases futures (v2, hors MVP) :**
+- Détection Coran / Adhan avec suspension traduction
+- Dashboard admin avancé (seuil détection, stats latence)

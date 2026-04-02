@@ -6,13 +6,13 @@ uvicorn==0.34.2
 websockets==15.0.1
 
 # Capture audio depuis le micro USB
-pyaudio==0.2.14
+sounddevice==0.5.1
 
 # Transcription arabe (OpenAI Whisper API)
 openai==1.78.1
 
-# Traduction (Claude Haiku via Anthropic)
-anthropic==0.52.0
+# Traduction fallback (Gemini Flash via Google)
+google-generativeai==0.8.5
 
 # Synthèse vocale (appels API ElevenLabs)
 httpx==0.28.1
@@ -22,3 +22,6 @@ python-multipart==0.0.20
 
 # Charger les clés API depuis le fichier .env
 python-dotenv==1.1.0
+
+# Azure Speech Translation (STT arabe + traduction simultanée streaming)
+azure-cognitiveservices-speech>=1.40.0

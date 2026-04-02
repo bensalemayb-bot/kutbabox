@@ -312,19 +312,24 @@
       <!-- BLOC 1 — Statut session -->
       <div class="bloc">
         <div class="bloc-titre">Session</div>
-        <div id="badge-session" class="badge-session inactif">
-          <span class="pastille"></span>
-          <span id="badge-texte">ARRÊTÉE</span>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <div id="badge-session" class="badge-session inactif">
+            <span class="pastille"></span>
+            <span id="badge-texte">ARRÊTÉE</span>
+          </div>
+          <div id="badge-mode-admin" style="display:inline-flex;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;background:rgba(234,179,8,0.15);border:1px solid rgba(234,179,8,0.4);color:#facc15;">Legacy</div>
         </div>
         <div class="heure-demarrage" id="heure-demarrage"></div>
 
         <div class="langues-grid" id="langues-grid">
           <label class="langue-checkbox"><input type="checkbox" value="fr" checked> 🇫🇷 fr</label>
           <label class="langue-checkbox"><input type="checkbox" value="en" checked> 🇬🇧 en</label>
+          <label class="langue-checkbox"><input type="checkbox" value="es" checked> 🇪🇸 es</label>
+          <label class="langue-checkbox"><input type="checkbox" value="pt" checked> 🇧🇷 pt</label>
           <label class="langue-checkbox"><input type="checkbox" value="tr" checked> 🇹🇷 tr</label>
           <label class="langue-checkbox"><input type="checkbox" value="ur" checked> 🇵🇰 ur</label>
-          <label class="langue-checkbox"><input type="checkbox" value="wo" checked> 🇸🇳 wo</label>
-          <label class="langue-checkbox"><input type="checkbox" value="ber" checked> 🏔️ ber</label>
+          <label class="langue-checkbox"><input type="checkbox" value="bs" checked> 🇧🇦 bs</label>
+          <label class="langue-checkbox"><input type="checkbox" value="sq" checked> 🇦🇱 sq</label>
         </div>
 
         <div class="session-btns">
@@ -467,6 +472,26 @@
         const res = await fetch('/api/status');
         if (!res.ok) return;
         const data = await res.json();
+
+        // Badge mode (Azure / Legacy)
+        try {
+          const healthRes = await fetch('/api/health');
+          if (healthRes.ok) {
+            const health = await healthRes.json();
+            const badge = document.getElementById('badge-mode-admin');
+            if (health.mode === 'azure') {
+              badge.textContent = 'Azure';
+              badge.style.background = 'rgba(59,130,246,0.15)';
+              badge.style.borderColor = 'rgba(59,130,246,0.4)';
+              badge.style.color = '#60a5fa';
+            } else {
+              badge.textContent = 'Legacy';
+              badge.style.background = 'rgba(234,179,8,0.15)';
+              badge.style.borderColor = 'rgba(234,179,8,0.4)';
+              badge.style.color = '#facc15';
+            }
+          }
+        } catch (e) { /* silencieux */ }
 
         // Badge session
         const actif = data.session.active;

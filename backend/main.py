@@ -12,18 +12,34 @@ import wave
 import base64
 import struct
 import asyncio
+import logging
 import threading
 from datetime import datetime, timezone
 from collections import deque
 
-import pyaudio
+try:
+    import pyaudio
+    HAS_PYAUDIO = True
+except ImportError:
+    HAS_PYAUDIO = False
+
+try:
+    import azure.cognitiveservices.speech as speechsdk
+    AZURE_AVAILABLE = True
+except ImportError:
+    AZURE_AVAILABLE = False
+
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 import openai
-import anthropic
+import google.generativeai as genai
 import uvicorn
+
+# Logger principal
+logger = logging.getLogger("khutbabox")
+logging.basicConfig(level=logging.INFO, format="[%(name)s] %(message)s")
 
 
 # ============================================================
@@ -33,14 +49,27 @@ import uvicorn
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 ADMIN_PIN = os.getenv("ADMIN_PIN", "0000")
 MOSQUE_NAME = os.getenv("MOSQUE_NAME", "Mosquée")
 BOX_ID = os.getenv("BOX_ID", "khutbabox-001")
 
+# Azure Speech Translation (optionnel — fallback sur Whisper+Gemini si absent)
+AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY", "")
+AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "westeurope")
+AZURE_ENABLED = bool(AZURE_SPEECH_KEY) and AZURE_AVAILABLE
+
+if AZURE_ENABLED:
+    logger.info("✅ Mode Azure Speech Translation activé")
+elif not AZURE_AVAILABLE:
+    logger.warning("⚠️ azure-cognitiveservices-speech non installé — mode Legacy forcé")
+else:
+    logger.info("⚠️ Mode Legacy (Whisper + Gemini) — AZURE_SPEECH_KEY non configurée")
+
 openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
-anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+genai.configure(api_key=GEMINI_API_KEY)
+gemini_model = genai.GenerativeModel("gemini-2.5-flash")
 
 app = FastAPI(title="KhutbaBox", version="1.0.0")
 
@@ -89,21 +118,46 @@ GLOSSAIRE = {
     "ما شاء الله": "Masha'Allah",
 }
 
-# Langues supportées (code → nom complet pour le prompt Claude)
+# Langues supportées — 8 langues cibles (code → nom complet pour les prompts)
 LANGUES = {
     "fr": "français",
     "en": "anglais",
+    "es": "espagnol",
+    "pt": "portugais",
     "tr": "turc",
     "ur": "ourdou",
-    "wo": "wolof",
-    "ber": "berbère (kabyle)",
+    "bs": "bosnien",
+    "sq": "albanais",
 }
 
-# Voix ElevenLabs (IDs par défaut — modifiables dans .env)
-VOIX = {
-    "male": os.getenv("ELEVENLABS_VOICE_MALE", "pNInz6obpgDQGcFmaJgB"),
-    "female": os.getenv("ELEVENLABS_VOICE_FEMALE", "21m00Tcm4TlvDq8ikWAM"),
+# TTS provider par langue (ElevenLabs Flash pour 5, Azure Neural pour 3)
+TTS_PROVIDERS = {
+    "fr": "elevenlabs",
+    "en": "elevenlabs",
+    "es": "elevenlabs",
+    "pt": "elevenlabs",
+    "tr": "elevenlabs",
+    "ur": "azure",    # Azure Neural TTS (ur-PK)
+    "bs": "azure",    # Azure Neural TTS (bs-BA)
+    "sq": "azure",    # Azure Neural TTS (sq-AL)
 }
+
+# Voix Azure Neural TTS pour les 3 langues
+AZURE_TTS_VOICES = {
+    "ur": "ur-PK-AsadNeural",
+    "bs": "bs-BA-GoranNeural",
+    "sq": "sq-AL-IlirNeural",
+}
+
+# Voix ElevenLabs par langue (Flash v2.5 multilingue — même voix, détecte la langue auto)
+ELEVENLABS_VOICES = {
+    "fr": os.getenv("ELEVENLABS_VOICE_MALE", "pNInz6obpgDQGcFmaJgB"),  # Adam
+    "en": os.getenv("ELEVENLABS_VOICE_MALE", "pNInz6obpgDQGcFmaJgB"),
+    "es": os.getenv("ELEVENLABS_VOICE_MALE", "pNInz6obpgDQGcFmaJgB"),
+    "pt": os.getenv("ELEVENLABS_VOICE_MALE", "pNInz6obpgDQGcFmaJgB"),
+    "tr": os.getenv("ELEVENLABS_VOICE_MALE", "pNInz6obpgDQGcFmaJgB"),
+}
+ELEVENLABS_MODEL = "eleven_flash_v2_5"
 
 
 # ============================================================
@@ -138,7 +192,7 @@ SILENCE_TIMEOUT = 120  # 2 minutes en secondes
 SAMPLE_RATE = 16000
 CHANNELS = 1
 CHUNK_DURATION = 5       # secondes par morceau
-AUDIO_FORMAT = pyaudio.paInt16
+AUDIO_FORMAT = pyaudio.paInt16 if HAS_PYAUDIO else 8
 FRAMES_PER_READ = 1024
 SILENCE_THRESHOLD = 500  # seuil RMS pour détecter la voix
 
@@ -168,7 +222,162 @@ def audio_vers_wav(audio_data: bytes) -> bytes:
 
 
 # ============================================================
-# 3. CAPTURE AUDIO — Thread séparé (micro USB)
+# 3a. BROADCAST — Envoi des traductions aux smartphones
+# ============================================================
+
+async def broadcast_translation(msg_type: str, lang: str, text: str = "", audio_b64: str = "", audio_format: str = ""):
+    """
+    Envoie un message WebSocket à tous les clients connectés sur cette langue.
+    msg_type : "partial", "final_text" ou "audio_chunk"
+    """
+    payload = {"type": msg_type, "lang": lang}
+    if msg_type == "audio_chunk":
+        payload["data"] = audio_b64
+        payload["format"] = audio_format
+    else:
+        payload["text"] = text
+
+    message = json.dumps(payload)
+    for info in list(clients.values()):
+        if info["lang"] == lang:
+            try:
+                await info["ws"].send_text(message)
+            except Exception:
+                pass
+
+
+# ============================================================
+# 3b. AZURE SPEECH TRANSLATOR — STT arabe + traduction streaming
+# ============================================================
+
+class AzureSpeechTranslator:
+    """
+    Gère le pipeline Azure Speech Translation streaming.
+    STT arabe + traduction simultanée vers 8 langues en un seul appel.
+    """
+
+    TARGET_LANGUAGES = {
+        "fr": "fr",
+        "en": "en",
+        "es": "es",
+        "pt": "pt",
+        "tr": "tr",
+        "ur": "ur",
+        "bs": "bs",
+        "sq": "sq",
+    }
+
+    def __init__(self, speech_key: str, speech_region: str, event_loop: asyncio.AbstractEventLoop):
+        self.loop = event_loop
+
+        # Config traduction : source arabe → 8 langues cibles
+        translation_config = speechsdk.translation.SpeechTranslationConfig(
+            subscription=speech_key,
+            region=speech_region,
+        )
+        translation_config.speech_recognition_language = "ar-SA"
+        for lang_code in self.TARGET_LANGUAGES.values():
+            translation_config.add_target_language(lang_code)
+
+        # Stream audio custom : PCM 16kHz 16-bit mono
+        audio_format = speechsdk.audio.AudioStreamFormat(
+            samples_per_second=16000,
+            bits_per_sample=16,
+            channels=1,
+        )
+        self.push_stream = speechsdk.audio.PushAudioInputStream(stream_format=audio_format)
+        audio_config = speechsdk.audio.AudioConfig(stream=self.push_stream)
+
+        # Recognizer
+        self.recognizer = speechsdk.translation.TranslationRecognizer(
+            translation_config=translation_config,
+            audio_config=audio_config,
+        )
+
+        # Callbacks
+        self.recognizer.recognizing.connect(self._on_recognizing)
+        self.recognizer.recognized.connect(self._on_recognized)
+        self.recognizer.canceled.connect(self._on_canceled)
+
+        logger.info("Azure Speech Translator initialisé (source: ar-SA, cibles: 8 langues)")
+
+    def start(self):
+        """Démarre la reconnaissance continue."""
+        self.recognizer.start_continuous_recognition()
+        logger.info("Azure Speech Translation — reconnaissance continue démarrée")
+
+    def push_audio(self, audio_data: bytes):
+        """Pousse des chunks audio PCM 16kHz 16-bit mono dans le stream."""
+        self.push_stream.write(audio_data)
+
+    def stop(self):
+        """Arrête la reconnaissance continue et ferme le stream."""
+        self.recognizer.stop_continuous_recognition()
+        self.push_stream.close()
+        logger.info("Azure Speech Translation — arrêté")
+
+    def _on_recognizing(self, evt):
+        """Texte partiel — envoie aux smartphones via WebSocket."""
+        if evt.result.reason == speechsdk.ResultReason.TranslatingSpeech:
+            translations = evt.result.translations
+            logger.debug(f"[PARTIEL] {len(translations)} langues")
+            for lang, text in translations.items():
+                if text.strip():
+                    asyncio.run_coroutine_threadsafe(
+                        broadcast_translation("partial", lang, text=text),
+                        self.loop,
+                    )
+
+    def _on_recognized(self, evt):
+        """Phrase complète — envoie le texte final + déclenche le TTS."""
+        if evt.result.reason == speechsdk.ResultReason.TranslatedSpeech:
+            translations = evt.result.translations
+            texte_arabe = evt.result.text
+            logger.info(f'[AZURE FINAL] Arabe : "{texte_arabe[:80]}"')
+
+            # Poster le traitement TTS dans la boucle asyncio principale
+            asyncio.run_coroutine_threadsafe(
+                self._process_recognized(texte_arabe, dict(translations)),
+                self.loop,
+            )
+
+    async def _process_recognized(self, texte_arabe: str, translations: dict):
+        """Traite une phrase reconnue : envoie texte final + TTS pour chaque langue."""
+        for lang, text in translations.items():
+            if not text.strip():
+                continue
+            logger.info(f'[AZURE FINAL] {lang} : "{text[:80]}"')
+
+            # Envoyer le texte final immédiatement
+            await broadcast_translation("final_text", lang, text=text)
+
+            # Générer et envoyer l'audio TTS
+            audio, fmt = await generer_tts(text, lang)
+            if audio:
+                audio_b64 = base64.b64encode(audio).decode()
+                await broadcast_translation("audio_chunk", lang, audio_b64=audio_b64, audio_format=fmt)
+            else:
+                logger.warning(f"[TTS] Pas d'audio pour {lang} — envoi texte uniquement")
+
+        # Enregistrer dans le monitoring
+        historique.append({
+            "heure": datetime.now(timezone.utc).isoformat(),
+            "texte_arabe": texte_arabe,
+            "traductions": translations,
+            "mode": "azure",
+        })
+
+    def _on_canceled(self, evt):
+        """Erreur Azure — log pour debugging."""
+        cancellation = evt.result
+        logger.error(f"[AZURE ANNULÉ] Raison : {cancellation.reason}")
+        if cancellation.reason == speechsdk.CancellationReason.Error:
+            logger.error(f"[AZURE ERREUR] Code : {cancellation.error_code}")
+            logger.error(f"[AZURE ERREUR] Détails : {cancellation.error_details}")
+
+
+# ============================================================
+# 3c. CAPTURE AUDIO — Thread séparé (micro USB)
 # ============================================================
 
 def thread_capture_audio(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue):
@@ -181,6 +390,11 @@ def thread_capture_audio(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue):
     """
     global last_voice_time
 
+    if not HAS_PYAUDIO:
+        logger.info("PyAudio non installé (normal dans Docker)")
+        logger.info("L'audio sera reçu via POST /api/audio/chunk ou WS /ws/audio-stream")
+        return
+
     pa = pyaudio.PyAudio()
     try:
         stream = pa.open(
@@ -191,8 +405,8 @@ def thread_capture_audio(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue):
             frames_per_buffer=FRAMES_PER_READ,
         )
     except OSError:
-        print("[KhutbaBox] Pas de micro détecté (normal dans Docker).")
-        print("[KhutbaBox] L'audio sera reçu via POST /api/audio/chunk")
+        logger.warning("Pas de micro détecté (normal dans Docker)")
+        logger.info("L'audio sera reçu via POST /api/audio/chunk ou WS /ws/audio-stream")
         pa.terminate()
         return
 
@@ -241,7 +455,7 @@ def thread_capture_audio(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue):
                     session["started_at"] = None
 
     except Exception as e:
-        print(f"[ERREUR MICRO] {e}")
+        logger.error(f"[ERREUR MICRO] {e}")
     finally:
         stream.stop_stream()
         stream.close()
@@ -249,7 +463,7 @@ def thread_capture_audio(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue):
 
 
 # ============================================================
-# 5. TRANSCRIPTION — OpenAI Whisper (arabe)
+# 5. TRANSCRIPTION LEGACY — OpenAI Whisper (arabe)
 # ============================================================
 
 async def transcrire(audio_data: bytes) -> str:
@@ -267,35 +481,9 @@ async def transcrire(audio_data: bytes) -> str:
     return response.text
 
 
-# ============================================================
-# 4. DÉTECTION CORAN — Claude Haiku
-# ============================================================
-
-async def detecter_coran(texte_arabe: str) -> bool:
-    """
-    Demande à Claude si le texte est une récitation coranique
-    ou un discours libre. Retourne True si c'est du Coran.
-    """
-    response = await asyncio.to_thread(
-        anthropic_client.messages.create,
-        model="claude-haiku-4-5-20251001",
-        max_tokens=10,
-        messages=[{
-            "role": "user",
-            "content": (
-                f"Voici un extrait transcrit d'un sermon de mosquée en arabe :\n\n"
-                f"«{texte_arabe}»\n\n"
-                f"Ce texte est-il une récitation coranique (verset du Coran récité) "
-                f"ou un discours/sermon libre de l'imam ?\n"
-                f"Réponds uniquement par un seul mot : CORAN ou DISCOURS"
-            ),
-        }],
-    )
-    return "CORAN" in response.content[0].text.upper()
-
 
 # ============================================================
-# 6. TRADUCTION — Claude Haiku + glossaire protégé
+# 6. TRADUCTION LEGACY — Gemini Flash + glossaire protégé
 # ============================================================
 
 async def traduire(texte_arabe: str, langue_cible: str) -> str:
@@ -309,43 +497,35 @@ async def traduire(texte_arabe: str, langue_cible: str) -> str:
     )
     nom_langue = LANGUES.get(langue_cible, langue_cible)
 
-    response = await asyncio.to_thread(
-        anthropic_client.messages.create,
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1024,
-        messages=[{
-            "role": "user",
-            "content": (
-                f"Tu es un traducteur professionnel spécialisé dans les sermons "
-                f"islamiques (khoutba).\n\n"
-                f"RÈGLES STRICTES :\n"
-                f"1. Traduis le texte arabe ci-dessous en {nom_langue}.\n"
-                f"2. Utilise un registre solennel et respectueux.\n"
-                f"3. Aucune traduction créative ni interprétation libre.\n"
-                f"4. Les termes islamiques suivants doivent être conservés "
-                f"EXACTEMENT tels quels dans la traduction :\n"
-                f"{glossaire_str}\n\n"
-                f"TEXTE ARABE À TRADUIRE :\n«{texte_arabe}»\n\n"
-                f"Réponds uniquement avec la traduction, sans commentaire "
-                f"ni explication."
-            ),
-        }],
+    prompt = (
+        f"Tu es un traducteur professionnel spécialisé dans les sermons "
+        f"islamiques (khoutba).\n\n"
+        f"RÈGLES STRICTES :\n"
+        f"1. Traduis le texte arabe ci-dessous en {nom_langue}.\n"
+        f"2. Utilise un registre solennel et respectueux.\n"
+        f"3. Aucune traduction créative ni interprétation libre.\n"
+        f"4. Les termes islamiques suivants doivent être conservés "
+        f"EXACTEMENT tels quels dans la traduction :\n"
+        f"{glossaire_str}\n\n"
+        f"TEXTE ARABE À TRADUIRE :\n«{texte_arabe}»\n\n"
+        f"Réponds uniquement avec la traduction, sans commentaire "
+        f"ni explication."
     )
-    return response.content[0].text
+    response = await asyncio.to_thread(
+        gemini_model.generate_content, prompt
+    )
+    return response.text
 
 
 # ============================================================
-# 7. SYNTHÈSE VOCALE — ElevenLabs (via httpx)
+# 7. SYNTHÈSE VOCALE — TTS hybride (ElevenLabs Flash + Azure Neural)
 # ============================================================
 
-async def synthetiser_voix(texte: str, voix: str = "male") -> bytes:
-    """
-    Envoie le texte à ElevenLabs et retourne l'audio MP3.
-    voix = "male" ou "female"
-    """
-    voice_id = VOIX.get(voix, VOIX["male"])
+# --- 7a. ElevenLabs Legacy (ancien modèle, gardé comme fallback) ---
+
+async def elevenlabs_tts_legacy(texte: str, voice_id: str = "pNInz6obpgDQGcFmaJgB") -> bytes:
+    """Ancien TTS ElevenLabs (eleven_multilingual_v2). Fallback uniquement."""
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-
     async with httpx.AsyncClient() as client:
         response = await client.post(
             url,
@@ -356,10 +536,7 @@ async def synthetiser_voix(texte: str, voix: str = "male") -> bytes:
             json={
                 "text": texte,
                 "model_id": "eleven_multilingual_v2",
-                "voice_settings": {
-                    "stability": 0.6,
-                    "similarity_boost": 0.8,
-                },
+                "voice_settings": {"stability": 0.6, "similarity_boost": 0.8},
             },
             params={"output_format": "mp3_44100_128"},
             timeout=30.0,
@@ -368,48 +545,139 @@ async def synthetiser_voix(texte: str, voix: str = "male") -> bytes:
         return response.content
 
 
+# --- 7b. ElevenLabs Flash v2.5 (streaming, ~75ms latence) ---
+
+async def elevenlabs_tts_stream(text: str, lang: str) -> bytes | None:
+    """
+    Génère de l'audio via ElevenLabs Flash v2.5 streaming.
+    Retourne les bytes audio MP3 complets ou None si erreur.
+    """
+    voice_id = ELEVENLABS_VOICES.get(lang, ELEVENLABS_VOICES["fr"])
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
+
+    debut = time.time()
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                url,
+                headers={
+                    "xi-api-key": ELEVENLABS_API_KEY,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "text": text,
+                    "model_id": ELEVENLABS_MODEL,
+                    "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+                },
+                params={"output_format": "mp3_44100_128"},
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            audio = response.content
+            latence = int((time.time() - debut) * 1000)
+            logger.info(f"[TTS ELEVENLABS] {lang} — {len(audio)} bytes, {latence}ms")
+            return audio
+    except Exception as e:
+        logger.error(f"[TTS ELEVENLABS] Erreur {lang} : {e}")
+        return None
+
+
+# --- 7c. Azure Neural TTS (~200ms latence) ---
+
+async def azure_tts(text: str, lang: str) -> bytes | None:
+    """
+    Génère de l'audio via Azure Neural TTS.
+    Retourne les bytes audio WAV ou None si erreur/non configuré.
+    """
+    if not AZURE_ENABLED:
+        logger.warning(f"[TTS AZURE] Demandé pour {lang} mais Azure non configuré")
+        return None
+
+    voice_name = AZURE_TTS_VOICES.get(lang)
+    if not voice_name:
+        logger.error(f"[TTS AZURE] Pas de voix configurée pour {lang}")
+        return None
+
+    debut = time.time()
+    try:
+        def _synthesize():
+            speech_config = speechsdk.SpeechConfig(
+                subscription=AZURE_SPEECH_KEY,
+                region=AZURE_SPEECH_REGION,
+            )
+            speech_config.speech_synthesis_voice_name = voice_name
+            # Sortie en mémoire (pas de fichier)
+            synthesizer = speechsdk.SpeechSynthesizer(
+                speech_config=speech_config,
+                audio_config=None,
+            )
+            result = synthesizer.speak_text(text)
+            if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+                return result.audio_data
+            elif result.reason == speechsdk.ResultReason.Canceled:
+                details = result.cancellation_details
+                logger.error(f"[TTS AZURE] Annulé : {details.reason} — {details.error_details}")
+                return None
+            return None
+
+        audio = await asyncio.to_thread(_synthesize)
+        if audio:
+            latence = int((time.time() - debut) * 1000)
+            logger.info(f"[TTS AZURE] {lang} ({voice_name}) — {len(audio)} bytes, {latence}ms")
+        return audio
+    except Exception as e:
+        logger.error(f"[TTS AZURE] Erreur {lang} : {e}")
+        return None
+
+
+# --- 7d. Routeur TTS principal ---
+
+async def generer_tts(text: str, lang: str) -> tuple[bytes | None, str]:
+    """
+    Route vers le bon provider TTS selon la langue.
+    Retourne (audio_bytes, format) ou (None, "") si erreur/non disponible.
+    format = "mp3" pour ElevenLabs, "wav" pour Azure
+    """
+    provider = TTS_PROVIDERS.get(lang, "elevenlabs")
+
+    if provider == "azure":
+        audio = await azure_tts(text, lang)
+        return (audio, "wav") if audio else (None, "")
+    else:
+        audio = await elevenlabs_tts_stream(text, lang)
+        return (audio, "mp3") if audio else (None, "")
+
+
 # ============================================================
-# 8. PIPELINE COMPLET — Transcription → Détection → Traduction → Voix → Envoi
+# 8. PIPELINE LEGACY — Transcription → Traduction → Voix → Envoi
+#    Utilisé quand Azure Speech Translation n'est pas configuré.
 # ============================================================
 
 async def pipeline_traduction(audio_data: bytes):
-    """Traite un morceau audio de 5 secondes à travers tout le pipeline."""
+    """Traite un morceau audio de 5 secondes à travers le pipeline Legacy."""
     debut = time.time()
 
     # --- Étape 1 : Transcription arabe ---
     texte_arabe = await transcrire(audio_data)
+    logger.info(f'[WHISPER] Transcription : "{texte_arabe}"')
     if not texte_arabe.strip():
+        logger.debug("[WHISPER] Texte vide — chunk ignoré")
         return
 
-    # --- Étape 2 : Détection Coran ---
-    est_coran = await detecter_coran(texte_arabe)
-
-    if est_coran:
-        # Récitation coranique → notifier tous les clients, pas de traduction
-        message = json.dumps({
-            "type": "coran",
-            "texte_arabe": texte_arabe,
-            "message": "تلاوة القرآن الكريم",
-        })
-        for info in list(clients.values()):
-            try:
-                await info["ws"].send_text(message)
-            except Exception:
-                pass
-        return
-
-    # --- Étape 3 : Regrouper les clients par (langue, voix) ---
+    # --- Étape 2 : Regrouper les clients par (langue, voix) ---
     groupes: dict[tuple[str, str], list[WebSocket]] = {}
     for info in list(clients.values()):
         cle = (info["lang"], info["voice"])
         groupes.setdefault(cle, []).append(info["ws"])
 
-    # --- Étape 4 : Traduire + synthétiser pour chaque groupe ---
+    # --- Étape 3 : Traduire + TTS hybride + envoyer pour chaque groupe ---
     for (langue, voix), liste_ws in groupes.items():
         try:
             traduction = await traduire(texte_arabe, langue)
-            audio_mp3 = await synthetiser_voix(traduction, voix)
-            audio_base64 = base64.b64encode(audio_mp3).decode()
+            logger.info(f'[TRADUCTION] {langue} : "{traduction[:80]}"')
+
+            # TTS hybride : ElevenLabs Flash ou Azure Neural selon la langue
+            audio, fmt = await generer_tts(traduction, langue)
 
             latence = int((time.time() - debut) * 1000)
 
@@ -424,22 +692,28 @@ async def pipeline_traduction(audio_data: bytes):
             })
 
             # Envoyer à chaque client du groupe
-            message = json.dumps({
+            message = {
                 "type": "traduction",
                 "texte_arabe": texte_arabe,
                 "traduction": traduction,
-                "audio_base64": audio_base64,
                 "latence_ms": latence,
                 "langue": langue,
-            })
+            }
+            if audio:
+                message["audio_base64"] = base64.b64encode(audio).decode()
+                message["audio_format"] = fmt
+            else:
+                logger.warning(f"[TTS] Pas d'audio pour {langue} — envoi texte uniquement")
+
+            msg_json = json.dumps(message)
             for ws in liste_ws:
                 try:
-                    await ws.send_text(message)
+                    await ws.send_text(msg_json)
                 except Exception:
                     pass
 
         except Exception as e:
-            print(f"[ERREUR PIPELINE] langue={langue} — {e}")
+            logger.error(f"[ERREUR PIPELINE] langue={langue} — {e}")
 
 
 async def boucle_pipeline(queue: asyncio.Queue):
@@ -450,7 +724,7 @@ async def boucle_pipeline(queue: asyncio.Queue):
             try:
                 await pipeline_traduction(audio_data)
             except Exception as e:
-                print(f"[ERREUR PIPELINE] {e}")
+                logger.error(f"[ERREUR PIPELINE] {e}")
 
 
 # ============================================================
@@ -479,6 +753,13 @@ async def ws_listen(ws: WebSocket):
             voix = "male"
 
         clients[client_id] = {"ws": ws, "lang": langue, "voice": voix}
+
+        # Envoyer le statut initial au client
+        await ws.send_text(json.dumps({
+            "type": "status",
+            "mode": "azure" if AZURE_ENABLED else "legacy",
+            "session_active": session["active"],
+        }))
 
         # Garder la connexion ouverte — le fidèle peut changer ses préférences
         while True:
@@ -511,6 +792,7 @@ async def recevoir_audio_chunk(file: UploadFile = File(...)):
     Le met dans la queue pour traitement par le pipeline.
     """
     if not session["active"]:
+        logger.warning("[CHUNK] Session inactive — audio ignoré")
         raise HTTPException(
             status_code=409,
             detail="Aucune session active. Démarrez une session d'abord.",
@@ -528,9 +810,68 @@ async def recevoir_audio_chunk(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Fichier WAV invalide.")
 
     # Mettre dans la queue pour le pipeline
+    logger.info(f"[CHUNK] Audio reçu — {len(audio_data)} bytes")
     await audio_queue.put(audio_data)
 
     return {"status": "ok", "taille_bytes": len(audio_data)}
+
+
+# ============================================================
+# 10ter. STREAMING AUDIO — WebSocket /ws/audio-stream
+#   Reçoit l'audio en streaming depuis audio_capture.py
+#   et le pousse dans Azure Speech Translation ou Legacy.
+# ============================================================
+
+@app.websocket("/ws/audio-stream")
+async def audio_stream_websocket(websocket: WebSocket):
+    """
+    Reçoit l'audio en streaming depuis audio_capture.py
+    et le pousse dans Azure Speech Translation (ou Legacy).
+    """
+    await websocket.accept()
+    logger.info("[WS AUDIO] Client audio connecté")
+
+    if AZURE_ENABLED:
+        # --- Mode Azure : streaming continu ---
+        translator = AzureSpeechTranslator(
+            speech_key=AZURE_SPEECH_KEY,
+            speech_region=AZURE_SPEECH_REGION,
+            event_loop=asyncio.get_event_loop(),
+        )
+        translator.start()
+        try:
+            while True:
+                data = await websocket.receive_bytes()
+                translator.push_audio(data)
+        except WebSocketDisconnect:
+            logger.info("[WS AUDIO] Client audio déconnecté")
+        except Exception as e:
+            logger.error(f"[WS AUDIO] Erreur : {e}")
+        finally:
+            translator.stop()
+    else:
+        # --- Mode Legacy : accumule ~5s d'audio puis Whisper+Gemini ---
+        logger.info("[WS AUDIO] Mode Legacy — accumulation par chunks de 5s")
+        buffer = bytearray()
+        target_size = SAMPLE_RATE * 2 * CHUNK_DURATION  # 16kHz * 2 octets * 5s = 160000 octets
+        try:
+            while True:
+                data = await websocket.receive_bytes()
+                buffer.extend(data)
+                # Quand on a ~5 secondes d'audio, envoyer au pipeline Legacy
+                if len(buffer) >= target_size:
+                    chunk = bytes(buffer[:target_size])
+                    buffer = buffer[target_size:]
+                    rms = calculer_rms(chunk)
+                    if rms > SILENCE_THRESHOLD:
+                        logger.info(f"[WS AUDIO LEGACY] Chunk voix détecté — {len(chunk)} bytes, RMS={rms:.0f}")
+                        await audio_queue.put(chunk)
+                    else:
+                        logger.debug(f"[WS AUDIO LEGACY] Silence — chunk ignoré (RMS={rms:.0f})")
+        except WebSocketDisconnect:
+            logger.info("[WS AUDIO] Client audio déconnecté")
+        except Exception as e:
+            logger.error(f"[WS AUDIO] Erreur : {e}")
 
 
 # ============================================================
@@ -602,12 +943,25 @@ async def health_check():
         "status": "ok",
         "mosque": MOSQUE_NAME,
         "box_id": BOX_ID,
+        "mode": "azure" if AZURE_ENABLED else "legacy",
         "apis": {
+            "azure_speech": AZURE_ENABLED,
             "openai": bool(OPENAI_API_KEY),
-            "anthropic": bool(ANTHROPIC_API_KEY),
+            "gemini": bool(GEMINI_API_KEY),
             "elevenlabs": bool(ELEVENLABS_API_KEY),
         },
     }
+
+
+@app.get("/api/gemini/models")
+async def list_gemini_models():
+    """Liste les modèles Gemini disponibles avec la clé API."""
+    try:
+        modeles = await asyncio.to_thread(lambda: list(genai.list_models()))
+        noms = [m.name for m in modeles if "generateContent" in (m.supported_generation_methods or [])]
+        return {"count": len(noms), "models": noms[:20]}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ============================================================
@@ -634,8 +988,10 @@ async def on_startup():
     # Lancer la boucle du pipeline de traduction
     asyncio.create_task(boucle_pipeline(audio_queue))
 
-    print(f"[KhutbaBox] Démarré — {MOSQUE_NAME} — Mode {session['mode']}")
-    print(f"[KhutbaBox] En attente de la voix de l'imam...")
+    mode_label = "Azure Speech Translation" if AZURE_ENABLED else "Legacy (Whisper + Gemini)"
+    logger.info(f"Démarré — {MOSQUE_NAME} — Pipeline: {mode_label}")
+    logger.info(f"Langues actives : {', '.join(LANGUES.keys())} ({len(LANGUES)} langues)")
+    logger.info("En attente de la voix de l'imam...")
 
 
 # Servir le frontend (fichiers HTML/JS/CSS)
@@ -652,8 +1008,8 @@ for _path in [_candidate1, _candidate2]:
 if FRONTEND_DIR:
     app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
 else:
-    print(f"[KhutbaBox] ⚠ Dossier frontend introuvable ou vide")
-    print(f"[KhutbaBox]   L'API fonctionne, mais pas de site web servi.")
+    logger.warning("Dossier frontend introuvable ou vide")
+    logger.warning("L'API fonctionne, mais pas de site web servi.")
 
 
 # ============================================================

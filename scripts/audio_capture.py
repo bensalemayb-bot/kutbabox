@@ -58,7 +58,7 @@ def lister_micros():
     micro_trouve = False
     for i, d in enumerate(devices):
         if d["max_input_channels"] > 0:
-            defaut = " ← DÉFAUT" if i == sd.default.device[0] else ""
+            defaut = " <-- DEFAUT" if i == sd.default.device[0] else ""
             print(f"  [{i}] {d['name']}{defaut}")
             micro_trouve = True
     if not micro_trouve:
@@ -146,7 +146,7 @@ async def stream_audio(url: str, token: str = ""):
                         # Envoyer TOUTES les frames (son + silence) — Azure attend un flux continu
                         await ws.send(audio_bytes)
                         if rms > SILENCE_THRESHOLD:
-                            logger.debug(f"Voix détectée — {len(audio_bytes)} bytes (RMS={rms:.0f})")
+                            logger.info(f"Voix detectee (RMS={rms:.0f})")
 
         except websockets.ConnectionClosed:
             logger.warning("WebSocket déconnecté")

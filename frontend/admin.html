@@ -336,6 +336,26 @@
           <button class="btn-demarrer" id="btn-demarrer">Démarrer la Khutba</button>
           <button class="btn-stopper" id="btn-stopper" disabled>Arrêter</button>
         </div>
+
+        <!-- Boutons Coran / Adhan -->
+        <div style="margin-top: 20px;">
+          <h3 style="color: #c9a84c; font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 12px;">Mode de diffusion</h3>
+          <div style="display: flex; gap: 10px;">
+            <button id="btn-quran" onclick="setMode('quran')"
+              style="flex:1; padding:14px; background:#065f46; color:#fff; border:none; border-radius:10px; font-size:16px; font-weight:600; cursor:pointer;">
+              Coran
+            </button>
+            <button id="btn-adhan" onclick="setMode('adhan')"
+              style="flex:1; padding:14px; background:#1e3a5f; color:#fff; border:none; border-radius:10px; font-size:16px; font-weight:600; cursor:pointer;">
+              Adhan
+            </button>
+            <button id="btn-live" onclick="setMode('live')"
+              style="flex:1; padding:14px; background:#c9a84c; color:#06101d; border:none; border-radius:10px; font-size:16px; font-weight:600; cursor:pointer;">
+              Reprendre
+            </button>
+          </div>
+          <p id="mode-status" style="text-align:center; margin-top:10px; color:#888; font-size:13px;">Mode actuel : Traduction en direct</p>
+        </div>
       </div>
 
       <!-- BLOC 2 — Statistiques temps réel -->
@@ -640,6 +660,36 @@
         // Silencieux
       }
     });
+
+    /* ============================================================
+       CORAN / ADHAN / REPRENDRE — POST /api/admin/mode/{mode}
+       ============================================================ */
+
+    async function setMode(mode) {
+      try {
+        const res = await fetch('/api/admin/mode/' + mode, {
+          method: 'POST',
+          headers: { 'X-Admin-Pin': pin },
+        });
+        const data = await res.json();
+        if (res.ok) {
+          updateModeButtons(mode);
+        } else {
+          alert(data.detail || 'Erreur');
+        }
+      } catch (e) {
+        alert('Erreur réseau');
+      }
+    }
+
+    function updateModeButtons(mode) {
+      document.getElementById('btn-quran').style.opacity = mode === 'quran' ? '1' : '0.5';
+      document.getElementById('btn-adhan').style.opacity = mode === 'adhan' ? '1' : '0.5';
+      document.getElementById('btn-live').style.opacity = mode === 'live' ? '1' : '0.5';
+
+      const labels = { 'live': 'Traduction en direct', 'quran': 'Récitation du Coran', 'adhan': 'Appel à la prière' };
+      document.getElementById('mode-status').textContent = 'Mode actuel : ' + (labels[mode] || mode);
+    }
   </script>
 
 </body>

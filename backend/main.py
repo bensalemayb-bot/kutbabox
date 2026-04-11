@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 # Modules KhutbaBox
-from deepgram_stt import run_deepgram_session
+from deepgram_stt import DeepgramSession
 from gpt_translator import init_translator, charger_glossaire, traduire
 from tts_engine import init_tts, generer_tts
 
@@ -230,14 +230,12 @@ async def audio_stream_websocket(websocket: WebSocket, token: str = Query(defaul
     await websocket.accept()
     logger.info("[WS AUDIO] Source audio connectée")
 
-    # Queue et event pour communiquer avec la session Deepgram
-    audio_queue = asyncio.Queue()
-    stop_event = asyncio.Event()
-
-    # Lancer Deepgram dans une tâche parallèle
-    deepgram_task = asyncio.create_task(
-        run_deepgram_session(on_partial_transcript, on_final_transcript, audio_queue, stop_event)
+    # Créer et démarrer la session Deepgram directement
+    stt = DeepgramSession(
+        on_partial=on_partial_transcript,
+        on_final=on_final_transcript,
     )
+    await stt.start()
 
     try:
         while True:
@@ -247,15 +245,14 @@ async def audio_stream_websocket(websocket: WebSocket, token: str = Query(defaul
                 logger.warning(f"[WS AUDIO] Message trop gros ({len(data)} bytes) — ignoré")
                 continue
             if session["mode"] == "live":
-                await audio_queue.put(data)
+                await stt.send_audio(data)
             # En mode quran/adhan, on reçoit l'audio mais on ne le transcrit pas
     except WebSocketDisconnect:
         logger.info("[WS AUDIO] Source audio déconnectée")
     except Exception as e:
         logger.error(f"[WS AUDIO] Erreur : {e}")
     finally:
-        stop_event.set()
-        await deepgram_task
+        await stt.stop()
 
 
 # ============================================================

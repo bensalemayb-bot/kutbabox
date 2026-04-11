@@ -86,7 +86,7 @@ async def run_deepgram_session(
 
     try:
         async with client.listen.v1.connect(
-            model="nova-3",
+            model="nova-3-general",
             language="ar",
             encoding="linear16",
             sample_rate=16000,

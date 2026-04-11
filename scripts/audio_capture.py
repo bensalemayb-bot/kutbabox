@@ -18,6 +18,7 @@
 # ============================================================
 
 import io
+import os
 import wave
 import struct
 import asyncio
@@ -91,11 +92,15 @@ def audio_vers_wav(audio_data: bytes) -> bytes:
 # MODE WEBSOCKET — Streaming continu (~100ms par frame)
 # ============================================================
 
-async def stream_audio(url: str):
+async def stream_audio(url: str, token: str = ""):
     """
     Capture le micro en continu et envoie les frames audio
     au backend via WebSocket. Reconnexion automatique.
     """
+    # Ajouter le token d'authentification à l'URL si fourni
+    if token:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}token={token}"
     micro = sd.default.device[0]
     if micro is None or micro < 0:
         logger.error("Aucun micro par défaut détecté ! Branche un micro USB et réessaie.")
@@ -138,11 +143,10 @@ async def stream_audio(url: str):
                         audio_bytes = await queue.get()
                         rms = calculer_rms(audio_bytes)
 
+                        # Envoyer TOUTES les frames (son + silence) — Azure attend un flux continu
+                        await ws.send(audio_bytes)
                         if rms > SILENCE_THRESHOLD:
-                            # Voix détectée → envoyer au backend
-                            await ws.send(audio_bytes)
-                            logger.debug(f"Envoyé {len(audio_bytes)} bytes (RMS={rms:.0f})")
-                        # Silence → on n'envoie rien
+                            logger.debug(f"Voix détectée — {len(audio_bytes)} bytes (RMS={rms:.0f})")
 
         except websockets.ConnectionClosed:
             logger.warning("WebSocket déconnecté")
@@ -236,9 +240,14 @@ if __name__ == "__main__":
         default=BACKEND_WS_URL,
         help=f"URL du backend WebSocket (défaut: {BACKEND_WS_URL})",
     )
+    parser.add_argument(
+        "--token",
+        default=os.environ.get("AUDIO_STREAM_TOKEN", ""),
+        help="Token d'authentification pour le WebSocket audio (ou variable AUDIO_STREAM_TOKEN)",
+    )
     args = parser.parse_args()
 
     if args.mode == "websocket":
-        asyncio.run(stream_audio(args.url))
+        asyncio.run(stream_audio(args.url, args.token))
     else:
         main_legacy()

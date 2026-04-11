@@ -13,7 +13,7 @@ from collections import deque
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Query
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
@@ -32,6 +32,10 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 ADMIN_PIN = os.getenv("ADMIN_PIN", "0000")
 MOSQUE_NAME = os.getenv("MOSQUE_NAME", "Mosquée")
 BOX_ID = os.getenv("BOX_ID", "khutbabox-001")
+AUDIO_STREAM_TOKEN = os.getenv("AUDIO_STREAM_TOKEN", "")  # Token pour authentifier la source audio
+
+# Limite de taille des messages WebSocket (512 Ko = ~16s d'audio PCM 16kHz)
+MAX_WS_MESSAGE_BYTES = 512 * 1024
 
 LANGUES = {
     "fr": "français", "en": "anglais", "es": "espagnol", "pt": "portugais",
@@ -191,6 +195,9 @@ async def ws_listen(ws: WebSocket):
         # Garder la connexion ouverte
         while True:
             msg = await ws.receive_text()
+            # Protection : ignorer les messages trop longs (max 1 Ko)
+            if len(msg) > 1024:
+                continue
             try:
                 update = json.loads(msg)
                 if "lang" in update and update["lang"] in LANGUES:
@@ -212,8 +219,14 @@ async def ws_listen(ws: WebSocket):
 # ============================================================
 
 @app.websocket("/ws/audio-stream")
-async def audio_stream_websocket(websocket: WebSocket):
+async def audio_stream_websocket(websocket: WebSocket, token: str = Query(default="")):
     """Reçoit l'audio du Raspberry Pi et le pousse dans Deepgram."""
+    # Authentification : si AUDIO_STREAM_TOKEN est configuré, vérifier le token
+    if AUDIO_STREAM_TOKEN and token != AUDIO_STREAM_TOKEN:
+        await websocket.close(code=4003, reason="Token invalide")
+        logger.warning("[WS AUDIO] Connexion refusée — token invalide")
+        return
+
     await websocket.accept()
     logger.info("[WS AUDIO] Source audio connectée")
 
@@ -226,6 +239,10 @@ async def audio_stream_websocket(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_bytes()
+            # Protection : rejeter les messages trop gros
+            if len(data) > MAX_WS_MESSAGE_BYTES:
+                logger.warning(f"[WS AUDIO] Message trop gros ({len(data)} bytes) — ignoré")
+                continue
             if session["mode"] == "live":
                 await stt.push_audio(data)
             # En mode quran/adhan, on reçoit l'audio mais on ne le transcrit pas

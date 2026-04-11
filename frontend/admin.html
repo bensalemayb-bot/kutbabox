@@ -448,7 +448,8 @@
       loginErreur.textContent = '';
 
       try {
-        const res = await fetch('/api/health', {
+        // Valider le PIN contre une route protégée (pas /api/health qui est publique)
+        const res = await fetch('/api/admin/history', {
           headers: { 'X-Admin-Pin': pin }
         });
 
@@ -458,6 +459,7 @@
           demarrerPolling();
         } else {
           loginErreur.textContent = 'PIN incorrect';
+          pin = '';
           inputPin.value = '';
           inputPin.focus();
         }
@@ -573,17 +575,26 @@
         // Afficher les 20 dernières, les plus récentes en haut
         const recentes = items.slice(-20).reverse();
 
-        tableauBody.innerHTML = recentes.map(item => {
-          const heure = new Date(item.heure).toLocaleTimeString('fr-FR');
-          const couleur = couleurLatence(item.latence_ms);
-          return `<tr>
-            <td>${heure}</td>
-            <td>${item.langue.toUpperCase()}</td>
-            <td class="col-arabe">${item.texte_arabe}</td>
-            <td>${item.traduction}</td>
-            <td class="col-latence" style="color:${couleur}">${item.latence_ms} ms</td>
-          </tr>`;
-        }).join('');
+        // Sécurité : construire le DOM avec textContent (pas innerHTML) pour éviter XSS
+        tableauBody.innerHTML = '';
+        recentes.forEach(item => {
+          const tr = document.createElement('tr');
+          const tdHeure = document.createElement('td');
+          tdHeure.textContent = new Date(item.heure).toLocaleTimeString('fr-FR');
+          const tdLangue = document.createElement('td');
+          tdLangue.textContent = (item.langue || '').toUpperCase();
+          const tdArabe = document.createElement('td');
+          tdArabe.className = 'col-arabe';
+          tdArabe.textContent = item.texte_arabe || '';
+          const tdTrad = document.createElement('td');
+          tdTrad.textContent = item.traduction || '';
+          const tdLatence = document.createElement('td');
+          tdLatence.className = 'col-latence';
+          tdLatence.style.color = couleurLatence(item.latence_ms);
+          tdLatence.textContent = (item.latence_ms || 0) + ' ms';
+          tr.append(tdHeure, tdLangue, tdArabe, tdTrad, tdLatence);
+          tableauBody.appendChild(tr);
+        });
 
       } catch (err) {
         // Silencieux

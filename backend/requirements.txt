@@ -1,27 +1,19 @@
-# Serveur web
-fastapi==0.115.12
-uvicorn==0.34.2
+# KhutbaBox v3 — dépendances Python
+fastapi>=0.100.0
+uvicorn>=0.23.0
+python-dotenv>=1.0.0
+httpx>=0.24.0
 
-# WebSocket (diffusion audio vers smartphones)
-websockets==15.0.1
+# STT — Deepgram Nova-3
+deepgram-sdk>=3.0.0
 
-# Capture audio depuis le micro USB
-sounddevice==0.5.1
+# Traduction — GPT-4.1 mini
+openai>=1.0.0
 
-# Transcription arabe (OpenAI Whisper API)
-openai==1.78.1
-
-# Traduction fallback (Gemini Flash via Google)
-google-generativeai==0.8.5
-
-# Synthèse vocale (appels API ElevenLabs)
-httpx==0.28.1
-
-# Réception de fichiers uploadés (nécessaire pour FastAPI UploadFile)
-python-multipart==0.0.20
-
-# Charger les clés API depuis le fichier .env
-python-dotenv==1.1.0
-
-# Azure Speech Translation (STT arabe + traduction simultanée streaming)
+# TTS — Azure Neural (ur, bs, sq)
 azure-cognitiveservices-speech>=1.40.0
+
+# Audio capture (Windows/Raspberry Pi uniquement, pas dans Docker)
+# sounddevice>=0.4.6
+# numpy>=1.24.0
+# websockets>=12.0

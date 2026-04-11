@@ -90,10 +90,10 @@ async def run_deepgram_session(
             language="ar",
             encoding="linear16",
             sample_rate=16000,
-            interim_results=True,
-            utterance_end_ms=1500,
+            interim_results="true",
+            utterance_end_ms="1500",
             endpointing=300,
-            smart_format=True,
+            smart_format="true",
         ) as socket:
             socket.on(EventType.MESSAGE, on_message)
             socket.on(EventType.ERROR, on_error)

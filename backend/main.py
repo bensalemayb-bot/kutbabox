@@ -230,23 +230,38 @@ async def audio_stream_websocket(websocket: WebSocket, token: str = Query(defaul
     await websocket.accept()
     logger.info("[WS AUDIO] Source audio connectée")
 
-    # Créer et démarrer la session Deepgram directement
     stt = DeepgramSession(
         on_partial=on_partial_transcript,
         on_final=on_final_transcript,
     )
-    await stt.start()
 
+    # Phase 1 : Buffer les premiers frames audio AVANT de connecter Deepgram
+    # Comme ça Deepgram reçoit de l'audio immédiatement après connexion (pas de timeout)
+    buffer = []
+    try:
+        for _ in range(50):  # ~5 secondes max de buffer (50 x 100ms)
+            data = await asyncio.wait_for(websocket.receive_bytes(), timeout=0.2)
+            if data and len(data) <= MAX_WS_MESSAGE_BYTES:
+                buffer.append(data)
+    except asyncio.TimeoutError:
+        pass
+    except WebSocketDisconnect:
+        logger.info("[WS AUDIO] Source audio déconnectée pendant le buffer")
+        return
+
+    logger.info(f"[WS AUDIO] {len(buffer)} frames bufferises, connexion Deepgram...")
+
+    # Phase 2 : Connecter Deepgram et envoyer le buffer d'un coup
+    await stt.start(initial_frames=buffer)
+
+    # Phase 3 : Continuer en temps réel
     try:
         while True:
             data = await websocket.receive_bytes()
-            # Protection : rejeter les messages trop gros
             if len(data) > MAX_WS_MESSAGE_BYTES:
-                logger.warning(f"[WS AUDIO] Message trop gros ({len(data)} bytes) — ignoré")
                 continue
             if session["mode"] == "live":
                 await stt.send_audio(data)
-            # En mode quran/adhan, on reçoit l'audio mais on ne le transcrit pas
     except WebSocketDisconnect:
         logger.info("[WS AUDIO] Source audio déconnectée")
     except Exception as e:

@@ -52,15 +52,21 @@ class DeepgramSession:
         self._receiver_task = None
         self._nb_frames = 0
 
-    async def start(self):
-        """Ouvre la connexion WebSocket vers Deepgram."""
+    async def start(self, initial_frames: list[bytes] = None):
+        """Ouvre la connexion Deepgram et envoie immédiatement les frames bufferisés."""
         headers = {"Authorization": f"Token {DEEPGRAM_API_KEY}"}
 
         self._ws = await websockets.connect(DEEPGRAM_URL, additional_headers=headers)
-        logger.info("[DEEPGRAM] Connexion WebSocket ouverte (Nova-3, arabe)")
+
+        # Envoyer les frames bufferisés IMMÉDIATEMENT après connexion
+        if initial_frames:
+            for frame in initial_frames:
+                await self._ws.send(frame)
+            logger.info(f"[DEEPGRAM] Connecté + {len(initial_frames)} frames envoyés immédiatement")
 
         # Lancer la réception des résultats en tâche de fond
         self._receiver_task = asyncio.create_task(self._receive_loop())
+        logger.info("[DEEPGRAM] Connexion streaming ouverte (Nova-3, arabe)")
 
     async def send_audio(self, audio_data: bytes):
         """Envoie un frame audio PCM à Deepgram."""

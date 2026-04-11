@@ -70,7 +70,12 @@ class DeepgramSession:
 
     @property
     def is_connected(self):
-        return self._ws is not None and self._ws.open
+        if self._ws is None:
+            return False
+        try:
+            return self._ws.state.name == "OPEN"
+        except Exception:
+            return self._ws is not None
 
     async def send_audio(self, audio_data: bytes):
         """Envoie un frame audio PCM à Deepgram."""

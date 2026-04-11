@@ -97,8 +97,6 @@ async def run_deepgram_session(
         ) as socket:
             socket.on(EventType.MESSAGE, on_message)
             socket.on(EventType.ERROR, on_error)
-
-            await socket.start_listening()
             logger.info("[DEEPGRAM] Connexion streaming ouverte (Nova-3, arabe)")
 
             # Boucle : lire l'audio de la queue et l'envoyer à Deepgram

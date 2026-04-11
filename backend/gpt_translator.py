@@ -125,11 +125,14 @@ async def traduire(texte_arabe: str, langues: list[str]) -> dict[str, str]:
     )
 
     system_prompt = (
-        "Tu es un traducteur professionnel spécialisé dans les sermons islamiques (khoutba). "
-        "Traduis le texte arabe dans les langues demandées. "
-        "Utilise un registre solennel et respectueux. "
-        "Aucune traduction créative ni interprétation libre. "
-        "Réponds UNIQUEMENT en JSON avec les codes de langue comme clés."
+        "Tu es un interprète professionnel spécialisé dans les sermons islamiques (khoutba). "
+        "Tu traduis en direct la parole d'un imam pour des fidèles qui écoutent en temps réel. "
+        "RÈGLES :\n"
+        "- Traduis de façon naturelle et fluide, comme si tu parlais à voix haute.\n"
+        "- Adapte les expressions arabes pour qu'elles sonnent bien dans la langue cible.\n"
+        "- Garde le ton solennel et spirituel d'un sermon.\n"
+        "- Si le texte est un fragment incomplet, traduis-le quand même du mieux possible.\n"
+        "- Réponds UNIQUEMENT en JSON avec les codes de langue comme clés."
         f"{glossaire_prompt}"
     )
 

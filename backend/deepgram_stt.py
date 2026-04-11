@@ -50,6 +50,7 @@ class DeepgramSession:
         self._on_final = on_final
         self._ws = None
         self._receiver_task = None
+        self._keepalive_task = None
         self._nb_frames = 0
 
     async def start(self, initial_frames: list[bytes] = None):
@@ -64,8 +65,9 @@ class DeepgramSession:
                 await self._ws.send(frame)
             logger.info(f"[DEEPGRAM] Connecté + {len(initial_frames)} frames envoyés immédiatement")
 
-        # Lancer la réception des résultats en tâche de fond
+        # Lancer la réception des résultats et le KeepAlive en tâches de fond
         self._receiver_task = asyncio.create_task(self._receive_loop())
+        self._keepalive_task = asyncio.create_task(self._keepalive_loop())
         logger.info("[DEEPGRAM] Connexion streaming ouverte (Nova-3, arabe)")
 
     @property
@@ -97,9 +99,17 @@ class DeepgramSession:
 
     async def stop(self):
         """Ferme proprement la connexion Deepgram."""
+        # Arrêter le KeepAlive
+        if self._keepalive_task:
+            self._keepalive_task.cancel()
+            try:
+                await self._keepalive_task
+            except asyncio.CancelledError:
+                pass
+            self._keepalive_task = None
+
         if self._ws:
             try:
-                # Signal de fermeture propre
                 await self._ws.send(json.dumps({"type": "CloseStream"}))
                 await asyncio.sleep(0.3)
                 await self._ws.close()
@@ -116,6 +126,19 @@ class DeepgramSession:
             self._receiver_task = None
 
         logger.info("[DEEPGRAM] Session terminée")
+
+    async def _keepalive_loop(self):
+        """Envoie un KeepAlive toutes les 5 secondes pour éviter le timeout Deepgram."""
+        try:
+            while self.is_connected:
+                await asyncio.sleep(5)
+                if self.is_connected:
+                    try:
+                        await self._ws.send(json.dumps({"type": "KeepAlive"}))
+                    except Exception:
+                        break
+        except asyncio.CancelledError:
+            pass
 
     async def _receive_loop(self):
         """Boucle de réception des résultats Deepgram."""

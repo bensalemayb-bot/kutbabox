@@ -235,12 +235,19 @@ async def audio_stream_websocket(websocket: WebSocket, token: str = Query(defaul
         on_final=on_final_transcript,
     )
 
-    # Phase 1 : Buffer les premiers frames audio AVANT de connecter Deepgram
+    # Phase 1 : Attendre le PREMIER frame audio (sans timeout — le micro peut mettre du temps à s'ouvrir)
+    # Puis buffer quelques frames supplémentaires
     # Comme ça Deepgram reçoit de l'audio immédiatement après connexion (pas de timeout)
-    buffer = []
     try:
-        for _ in range(50):  # ~5 secondes max de buffer (50 x 100ms)
-            data = await asyncio.wait_for(websocket.receive_bytes(), timeout=0.2)
+        first_frame = await websocket.receive_bytes()
+    except WebSocketDisconnect:
+        logger.info("[WS AUDIO] Source audio déconnectée avant le premier frame")
+        return
+
+    buffer = [first_frame]
+    try:
+        for _ in range(30):  # ~3 secondes de buffer supplémentaire
+            data = await asyncio.wait_for(websocket.receive_bytes(), timeout=0.15)
             if data and len(data) <= MAX_WS_MESSAGE_BYTES:
                 buffer.append(data)
     except asyncio.TimeoutError:

@@ -56,7 +56,7 @@ class DeepgramSession:
         """Ouvre la connexion WebSocket vers Deepgram."""
         headers = {"Authorization": f"Token {DEEPGRAM_API_KEY}"}
 
-        self._ws = await websockets.connect(DEEPGRAM_URL, extra_headers=headers)
+        self._ws = await websockets.connect(DEEPGRAM_URL, additional_headers=headers)
         logger.info("[DEEPGRAM] Connexion WebSocket ouverte (Nova-3, arabe)")
 
         # Lancer la réception des résultats en tâche de fond

@@ -68,9 +68,13 @@ class DeepgramSession:
         self._receiver_task = asyncio.create_task(self._receive_loop())
         logger.info("[DEEPGRAM] Connexion streaming ouverte (Nova-3, arabe)")
 
+    @property
+    def is_connected(self):
+        return self._ws is not None and self._ws.open
+
     async def send_audio(self, audio_data: bytes):
         """Envoie un frame audio PCM à Deepgram."""
-        if not self._ws or not audio_data:
+        if not self.is_connected or not audio_data:
             return
         try:
             await self._ws.send(audio_data)
@@ -79,8 +83,12 @@ class DeepgramSession:
                 logger.info(f"[DEEPGRAM] Premier frame envoye — {len(audio_data)} bytes")
             elif self._nb_frames % 500 == 0:
                 logger.info(f"[DEEPGRAM] {self._nb_frames} frames envoyees")
+        except websockets.ConnectionClosed:
+            logger.warning("[DEEPGRAM] Connexion fermee — arret envoi")
+            self._ws = None
         except Exception as e:
             logger.error(f"[DEEPGRAM] Erreur envoi : {e}")
+            self._ws = None
 
     async def stop(self):
         """Ferme proprement la connexion Deepgram."""

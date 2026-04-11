@@ -105,7 +105,7 @@ async def run_deepgram_session(
             while not stop_event.is_set():
                 try:
                     audio_data = await asyncio.wait_for(audio_queue.get(), timeout=0.5)
-                    socket.send_media(audio_data)
+                    await socket.send_media(audio_data)
                 except asyncio.TimeoutError:
                     continue
                 except Exception as e:
@@ -114,7 +114,7 @@ async def run_deepgram_session(
 
             # Fermeture propre
             try:
-                socket.send_finalize()
+                await socket.send_finalize()
             except Exception:
                 pass
             logger.info("[DEEPGRAM] Session terminée")

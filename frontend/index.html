@@ -318,6 +318,15 @@
         <div class="barre" style="--hauteur: 30px; --duree: 0.55s;"></div>
       </div>
 
+      <div class="message-special cache" id="message-special"
+        style="text-align:center; padding:30px 20px; margin-bottom:20px;
+               background:rgba(201,168,76,0.1); border:1px solid rgba(201,168,76,0.3);
+               border-radius:14px;">
+        <div style="font-size:32px; margin-bottom:12px;" id="message-special-icon"></div>
+        <div id="message-special-texte"
+          style="font-size:18px; color:#c9a84c; font-weight:500;"></div>
+      </div>
+
       <div class="zone-traduction" id="zone-traduction">
         <div class="texte-partiel cache" id="texte-partiel"></div>
         <div class="historique" id="historique">
@@ -343,9 +352,10 @@
     let modeBackend = 'legacy'; // azure ou legacy
     const MAX_HISTORIQUE = 10;  // nombre max de phrases affichées
 
-    // Audio queue (Blob URL player)
+    // Audio queue — un seul élément audio réutilisé (compatibilité mobile)
     const audioQueue = [];
     let isPlaying = false;
+    let audioElement = null;    // élément audio persistant créé au clic
 
     /* ============================================================
        ÉLÉMENTS DU DOM
@@ -403,6 +413,17 @@
       source.connect(audioCtx.destination);
       source.start();
 
+      // Créer un élément audio persistant pendant le geste utilisateur (obligatoire sur mobile)
+      audioElement = new Audio();
+      audioElement.volume = 1.0;
+      // Jouer un silence pour débloquer l'autoplay sur iOS/Android
+      audioElement.src = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAAYYoRwBHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+      audioElement.play().then(() => {
+        console.log('[KhutbaBox] Audio mobile débloqué');
+      }).catch(() => {
+        console.warn('[KhutbaBox] Impossible de débloquer audio mobile');
+      });
+
       const protocole = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const url = `${protocole}//${window.location.host}/ws/listen`;
 
@@ -421,6 +442,14 @@
           case 'status':
             modeBackend = msg.mode || 'legacy';
             mettreAJourBadgeMode();
+            // Gestion mode Coran/Adhan
+            if (msg.mode === 'quran') {
+              afficherMessageSpecial('Récitation du Saint Coran en cours...', '\u{1F54C}');
+            } else if (msg.mode === 'adhan') {
+              afficherMessageSpecial("Appel à la prière (Adhan) en cours...", '\u{1F54C}');
+            } else if (msg.mode === 'live' || msg.mode === 'stopped') {
+              masquerMessageSpecial();
+            }
             break;
           case 'partial':
             afficherPartiel(msg.text);
@@ -429,6 +458,7 @@
             afficherFinal(msg.text);
             break;
           case 'audio_chunk':
+            console.log('[KhutbaBox] audio_chunk reçu:', msg.data ? msg.data.length + ' chars base64' : 'PAS DE DATA');
             jouerAudio(msg.data, msg.format || 'mp3');
             break;
           case 'traduction':
@@ -494,6 +524,18 @@
       historiqueDiv.scrollTop = historiqueDiv.scrollHeight;
     }
 
+    function afficherMessageSpecial(texte, icone) {
+      document.getElementById('message-special-icon').textContent = icone || '';
+      document.getElementById('message-special-texte').textContent = texte;
+      document.getElementById('message-special').classList.remove('cache');
+      document.getElementById('zone-traduction').classList.add('cache');
+    }
+
+    function masquerMessageSpecial() {
+      document.getElementById('message-special').classList.add('cache');
+      document.getElementById('zone-traduction').classList.remove('cache');
+    }
+
     /* ============================================================
        AUDIO PLAYER — Blob URL (compatible mp3 + wav)
        ============================================================ */
@@ -511,21 +553,31 @@
       }
       isPlaying = true;
       const { data, mime } = audioQueue.shift();
+      console.log('[KhutbaBox] Lecture audio:', mime, data ? data.length + ' chars' : 'vide');
 
       const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
       const blob = new Blob([bytes], { type: mime });
       const url = URL.createObjectURL(blob);
 
-      const audio = new Audio(url);
-      audio.onended = () => {
+      // Réutiliser l'élément audio créé au clic (déjà autorisé par le navigateur mobile)
+      const player = audioElement || new Audio();
+      player.onended = () => {
         URL.revokeObjectURL(url);
         jouerProchain();
       };
-      audio.onerror = () => {
+      player.onerror = () => {
+        console.warn('[KhutbaBox] Erreur lecture audio');
         URL.revokeObjectURL(url);
         jouerProchain();
       };
-      audio.play().catch(() => jouerProchain());
+      player.src = url;
+      player.play().then(() => {
+        console.log('[KhutbaBox] Audio OK');
+      }).catch((err) => {
+        console.warn('[KhutbaBox] Audio bloqué:', err.message);
+        URL.revokeObjectURL(url);
+        jouerProchain();
+      });
     }
 
     /* ============================================================

@@ -4,8 +4,8 @@ uvicorn>=0.23.0
 python-dotenv>=1.0.0
 httpx>=0.24.0
 
-# STT — Deepgram Nova-3
-deepgram-sdk>=3.0.0
+# STT — Deepgram Nova-3 (WebSocket brut, plus fiable que le SDK avec FastAPI)
+websockets>=12.0
 
 # Traduction — GPT-4.1 mini
 openai>=1.0.0

@@ -1,10 +1,7 @@
 """
 KhutbaBox — Deepgram Nova-3 STT streaming
-Transcription arabe en temps réel via WebSocket.
-Compatible avec deepgram-sdk v6.x
-
-Approche directe : pas de queue, l'audio est envoyé directement à Deepgram
-depuis le handler WebSocket via une référence partagée au socket.
+Transcription arabe en temps réel via WebSocket brut (sans SDK).
+Plus fiable que le SDK v6 avec FastAPI (pas de bugs de handshake).
 """
 
 import os
@@ -13,18 +10,35 @@ import logging
 import asyncio
 from typing import Callable, Awaitable
 
-from deepgram import AsyncDeepgramClient
-from deepgram.core.events import EventType
+import websockets
 
 logger = logging.getLogger("khutbabox.stt")
 
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
 
+DEEPGRAM_URL = (
+    "wss://api.deepgram.com/v1/listen"
+    "?model=nova-3-general"
+    "&language=ar"
+    "&encoding=linear16"
+    "&sample_rate=16000"
+    "&interim_results=true"
+    "&utterance_end_ms=1500"
+    "&endpointing=300"
+    "&smart_format=true"
+)
+
 
 class DeepgramSession:
     """
-    Gère une session Deepgram Nova-3.
-    L'audio est envoyé directement via send_audio(), pas via une queue.
+    Gère une session Deepgram Nova-3 via WebSocket brut.
+    Plus fiable que le SDK v6 avec FastAPI.
+
+    Usage:
+        stt = DeepgramSession(on_partial=..., on_final=...)
+        await stt.start()
+        await stt.send_audio(pcm_bytes)
+        await stt.stop()
     """
 
     def __init__(
@@ -34,112 +48,94 @@ class DeepgramSession:
     ):
         self._on_partial = on_partial
         self._on_final = on_final
-        self._socket = None
-        self._client = None
-        self._context = None
-        self._ready = False
+        self._ws = None
+        self._receiver_task = None
         self._nb_frames = 0
 
     async def start(self):
-        """Ouvre la connexion Deepgram et la garde ouverte."""
-        os.environ["DEEPGRAM_API_KEY"] = DEEPGRAM_API_KEY
-        self._client = AsyncDeepgramClient()
+        """Ouvre la connexion WebSocket vers Deepgram."""
+        headers = {"Authorization": f"Token {DEEPGRAM_API_KEY}"}
 
-        # Ouvrir la connexion
-        self._context = self._client.listen.v1.connect(
-            model="nova-3-general",
-            language="ar",
-            encoding="linear16",
-            sample_rate=16000,
-            interim_results="true",
-            utterance_end_ms="1500",
-            endpointing=300,
-            smart_format="true",
-        )
-        self._socket = await self._context.__aenter__()
+        self._ws = await websockets.connect(DEEPGRAM_URL, extra_headers=headers)
+        logger.info("[DEEPGRAM] Connexion WebSocket ouverte (Nova-3, arabe)")
 
-        # Callbacks
-        self._socket.on(EventType.MESSAGE, self._on_message)
-        self._socket.on(EventType.ERROR, self._on_error)
-
-        # Envoyer du silence pour initialiser la connexion
-        silent = b'\x00' * 3200
-        for _ in range(10):
-            await self._socket.send_media(silent)
-            await asyncio.sleep(0.01)
-
-        self._ready = True
-        logger.info("[DEEPGRAM] Connexion streaming ouverte (Nova-3, arabe)")
+        # Lancer la réception des résultats en tâche de fond
+        self._receiver_task = asyncio.create_task(self._receive_loop())
 
     async def send_audio(self, audio_data: bytes):
-        """Envoie un frame audio directement à Deepgram."""
-        if not self._ready or not self._socket:
+        """Envoie un frame audio PCM à Deepgram."""
+        if not self._ws or not audio_data:
             return
         try:
-            await self._socket.send_media(audio_data)
+            await self._ws.send(audio_data)
             self._nb_frames += 1
             if self._nb_frames == 1:
-                logger.info(f"[DEEPGRAM] Premier frame audio envoye — {len(audio_data)} bytes")
+                logger.info(f"[DEEPGRAM] Premier frame envoye — {len(audio_data)} bytes")
             elif self._nb_frames % 500 == 0:
                 logger.info(f"[DEEPGRAM] {self._nb_frames} frames envoyees")
         except Exception as e:
             logger.error(f"[DEEPGRAM] Erreur envoi : {e}")
-            self._ready = False
 
     async def stop(self):
-        """Ferme la connexion Deepgram."""
-        self._ready = False
-        if self._socket and self._context:
+        """Ferme proprement la connexion Deepgram."""
+        if self._ws:
             try:
-                await self._socket.send_finalize()
+                # Signal de fermeture propre
+                await self._ws.send(json.dumps({"type": "CloseStream"}))
+                await asyncio.sleep(0.3)
+                await self._ws.close()
             except Exception:
                 pass
-            try:
-                await self._context.__aexit__(None, None, None)
-            except Exception:
-                pass
-            self._socket = None
-            self._context = None
-            logger.info("[DEEPGRAM] Session terminée")
+            self._ws = None
 
-    def _on_message(self, message):
-        """Callback Deepgram : résultats de transcription."""
+        if self._receiver_task:
+            self._receiver_task.cancel()
+            try:
+                await self._receiver_task
+            except asyncio.CancelledError:
+                pass
+            self._receiver_task = None
+
+        logger.info("[DEEPGRAM] Session terminée")
+
+    async def _receive_loop(self):
+        """Boucle de réception des résultats Deepgram."""
         try:
-            if isinstance(message, dict):
-                data = message
-            elif hasattr(message, "model_dump"):
-                data = message.model_dump()
-            else:
-                data = json.loads(str(message))
+            async for msg in self._ws:
+                try:
+                    data = json.loads(msg)
 
-            results = data.get("results")
-            if not results:
-                return
+                    # Ignorer les messages qui ne sont pas des résultats
+                    msg_type = data.get("type", "")
+                    if msg_type != "Results":
+                        continue
 
-            channels = results.get("channels", [])
-            if not channels:
-                return
+                    channel = data.get("channel", {})
+                    alternatives = channel.get("alternatives", [])
+                    if not alternatives:
+                        continue
 
-            alternatives = channels[0].get("alternatives", [])
-            if not alternatives:
-                return
+                    transcript = alternatives[0].get("transcript", "")
+                    if not transcript:
+                        continue
 
-            transcript = alternatives[0].get("transcript", "")
-            if not transcript:
-                return
+                    is_final = data.get("is_final", False)
 
-            is_final = results.get("is_final", False)
+                    if is_final:
+                        logger.info(f'[DEEPGRAM FINAL] "{transcript[:80]}"')
+                        await self._on_final(transcript)
+                    else:
+                        logger.debug(f'[DEEPGRAM PARTIEL] "{transcript[:80]}"')
+                        await self._on_partial(transcript)
 
-            if is_final:
-                logger.info(f'[DEEPGRAM FINAL] "{transcript[:80]}"')
-                asyncio.ensure_future(self._on_final(transcript))
-            else:
-                logger.debug(f'[DEEPGRAM PARTIEL] "{transcript[:80]}"')
-                asyncio.ensure_future(self._on_partial(transcript))
+                except json.JSONDecodeError:
+                    pass
+                except Exception as e:
+                    logger.error(f"[DEEPGRAM] Erreur traitement message : {e}")
 
+        except websockets.ConnectionClosed as e:
+            logger.warning(f"[DEEPGRAM] Connexion fermée : {e}")
+        except asyncio.CancelledError:
+            pass
         except Exception as e:
-            logger.error(f"[DEEPGRAM] Erreur callback : {e}")
-
-    def _on_error(self, error):
-        """Callback Deepgram : erreur."""
-        logger.error(f"[DEEPGRAM] Erreur : {error}")
+            logger.error(f"[DEEPGRAM] Erreur réception : {e}")

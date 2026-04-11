@@ -1,13 +1,12 @@
-FROM python:3.11-slim
-
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    portaudio19-dev \
-    gcc \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+FROM python:3.12-slim
 
 WORKDIR /app
+
+# Dépendances système pour Azure Speech SDK
+RUN apt-get update && apt-get install -y \
+    libssl-dev \
+    libasound2 \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

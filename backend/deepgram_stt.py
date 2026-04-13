@@ -23,8 +23,8 @@ DEEPGRAM_URL = (
     "&encoding=linear16"
     "&sample_rate=16000"
     "&interim_results=true"
-    "&utterance_end_ms=2000"
-    "&endpointing=800"
+    "&utterance_end_ms=2500"
+    "&endpointing=1000"
     "&smart_format=true"
 )
 

@@ -58,6 +58,9 @@ session = {
 
 historique = deque(maxlen=50)
 
+# Rolling buffer: 3 dernières phrases (arabe, dict_traductions) pour cohérence
+contexte_recent: deque = deque(maxlen=3)
+
 # Clients WebSocket connectés : {id: {"ws": WebSocket, "lang": str, "voice": str}}
 clients: dict[str, dict] = {}
 
@@ -108,50 +111,62 @@ async def on_partial_transcript(text: str):
 async def on_final_transcript(text: str):
     """
     Reçoit la phrase complète de Deepgram.
-    → Traduit via GPT-4.1 mini
-    → Envoie texte + TTS aux fidèles.
+    → Traduit en 8 langues via GPT streaming parallèle
+    → Diffuse chaque langue aux fidèles dès qu'elle est prête (texte + TTS)
+    → Met à jour le rolling buffer pour cohérence
     """
     if session["mode"] != "live":
-        return  # Coran ou Adhan en cours — pas de traduction
+        return  # Coran ou Adhan en cours
 
-    # Langues où au moins 1 fidèle est connecté
     langues_connectees = list({info["lang"] for info in clients.values()})
     if not langues_connectees:
         logger.debug("[PIPELINE] Aucun fidèle connecté — pas de traduction")
         return
 
-    # Étape 1 : Traduire via GPT-4.1 mini
-    traductions = await traduire(text, langues_connectees)
-    if not traductions:
-        logger.warning("[PIPELINE] Traduction vide")
-        return
+    # Callback 1 : token-par-token → broadcast "partial_translation"
+    async def on_partial_token(lang: str, texte_accumule: str):
+        await broadcast_translation("partial_translation", lang, text=texte_accumule)
 
-    # Étape 2 : Envoyer le texte final immédiatement + lancer TTS en parallèle
-    async def traiter_langue(lang: str, texte_traduit: str):
-        # Envoyer le texte tout de suite (le fidèle voit le sous-titre)
-        await broadcast_translation("final_text", lang, text=texte_traduit)
+    # Callback 2 : phrase complète pour une langue → texte final + TTS
+    async def on_langue_finie(lang: str, texte_final: str):
+        # 1. Texte final (finalise le streaming côté client)
+        await broadcast_translation("final_text", lang, text=texte_final)
 
-        # Trouver la voix préférée pour cette langue (prendre le 1er client trouvé)
+        # 2. Voix préférée pour cette langue
         voix = "male"
         for info in clients.values():
             if info["lang"] == lang:
                 voix = info.get("voice", "male")
                 break
 
-        # Générer le TTS
-        audio, fmt = await generer_tts(texte_traduit, lang, voix)
+        # 3. TTS puis broadcast audio
+        try:
+            audio, fmt = await generer_tts(texte_final, lang, voix)
+        except Exception as e:
+            logger.error(f"[TTS] Erreur {lang}: {e}")
+            audio, fmt = None, ""
+
         if audio:
             audio_b64 = base64.b64encode(audio).decode()
             await broadcast_translation("audio_chunk", lang, audio_b64=audio_b64, audio_format=fmt)
         else:
             logger.warning(f"[TTS] Pas d'audio pour {lang}")
 
-    # Lancer TTS en parallèle pour toutes les langues
-    taches = [
-        traiter_langue(lang, texte)
-        for lang, texte in traductions.items()
-    ]
-    await asyncio.gather(*taches)
+    # Appel traduire() avec contexte rolling + callbacks
+    traductions = await traduire(
+        texte_arabe=text,
+        langues=langues_connectees,
+        contexte_recent=list(contexte_recent),
+        on_partial=on_partial_token,
+        on_final=on_langue_finie,
+    )
+
+    if not traductions:
+        logger.warning("[PIPELINE] Traduction vide")
+        return
+
+    # Mettre à jour le rolling buffer (maxlen=3 géré par deque)
+    contexte_recent.append((text, traductions))
 
     # Monitoring
     historique.append({

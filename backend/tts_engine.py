@@ -52,11 +52,15 @@ TTS_PROVIDERS = {
 # Sémaphore ElevenLabs : max 2 appels simultanés (évite erreur 429)
 _elevenlabs_semaphore: asyncio.Semaphore | None = None
 
+# Client HTTP persistant (réutilise les connexions TLS)
+_http_client: httpx.AsyncClient | None = None
+
 
 def init_tts():
-    """Initialise le sémaphore. Appeler une fois au démarrage de FastAPI."""
-    global _elevenlabs_semaphore
+    """Initialise le sémaphore et le client HTTP. Appeler une fois au démarrage de FastAPI."""
+    global _elevenlabs_semaphore, _http_client
     _elevenlabs_semaphore = asyncio.Semaphore(2)
+    _http_client = httpx.AsyncClient(timeout=30.0)
 
 
 async def elevenlabs_tts(text: str, lang: str, voice: str = "male") -> bytes | None:
@@ -69,8 +73,8 @@ async def elevenlabs_tts(text: str, lang: str, voice: str = "male") -> bytes | N
 
     debut = time.time()
     try:
-        async with _elevenlabs_semaphore, httpx.AsyncClient() as client:
-            response = await client.post(
+        async with _elevenlabs_semaphore:
+            response = await _http_client.post(
                 url,
                 headers={
                     "xi-api-key": ELEVENLABS_API_KEY,
@@ -82,7 +86,6 @@ async def elevenlabs_tts(text: str, lang: str, voice: str = "male") -> bytes | N
                     "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
                 },
                 params={"output_format": "mp3_44100_128"},
-                timeout=30.0,
             )
             response.raise_for_status()
             audio = response.content

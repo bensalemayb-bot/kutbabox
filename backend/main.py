@@ -100,8 +100,15 @@ async def broadcast_status(mode: str):
 
 
 # ============================================================
-# PIPELINE — Deepgram → GPT → TTS → Broadcast
+# PIPELINE — Deepgram → Accumulateur → GPT → TTS → Broadcast
 # ============================================================
+
+# Accumulateur : accumule les segments Deepgram avant de traduire
+_acc_text: str = ""
+_acc_timer: asyncio.Task | None = None
+WORD_THRESHOLD = 8    # Nombre de mots minimum avant de traduire
+MAX_WAIT_SECONDS = 4  # Temps max d'attente même si <8 mots
+
 
 async def on_partial_transcript(text: str):
     """Reçoit le texte partiel de Deepgram → broadcast à tous les fidèles."""
@@ -110,21 +117,88 @@ async def on_partial_transcript(text: str):
         await broadcast_translation("partial", lang, text=text)
 
 
-async def on_final_transcript(text: str):
+async def on_segment(text: str):
     """
-    Reçoit la phrase complète de Deepgram.
-    → Traduit en 8 langues via GPT streaming parallèle
-    → Diffuse chaque langue aux fidèles dès qu'elle est prête (texte + TTS)
-    → Met à jour le rolling buffer pour cohérence
+    Reçoit un segment is_final de Deepgram (3-5 mots).
+    Accumule dans le buffer. Flush si on atteint le seuil de mots.
+    Ne bloque JAMAIS la boucle de réception Deepgram.
     """
+    global _acc_text, _acc_timer
+
     if session["mode"] != "live":
-        return  # Coran ou Adhan en cours
+        return
+
+    # Ajouter au buffer
+    _acc_text = (_acc_text + " " + text).strip() if _acc_text else text
+    word_count = len(_acc_text.split())
+
+    logger.debug(f"[ACC] +{len(text.split())} mots → buffer: {word_count} mots")
+
+    # Flush si on a assez de mots
+    if word_count >= WORD_THRESHOLD:
+        await _flush_accumulator()
+    elif _acc_timer is None:
+        # Démarrer le timer de sécurité (flush après MAX_WAIT_SECONDS)
+        _acc_timer = asyncio.create_task(_accumulator_timeout())
+
+
+async def on_speech_final_handler(text: str):
+    """
+    Reçoit un speech_final de Deepgram (l'imam a fait une pause).
+    Ajoute le texte au buffer et flush IMMÉDIATEMENT.
+    """
+    global _acc_text
+
+    if session["mode"] != "live":
+        return
+
+    if text:
+        _acc_text = (_acc_text + " " + text).strip() if _acc_text else text
+
+    if _acc_text:
+        logger.info(f"[ACC] speech_final → flush immédiat ({len(_acc_text.split())} mots)")
+        await _flush_accumulator()
+
+
+async def _accumulator_timeout():
+    """Timer de sécurité : flush après MAX_WAIT_SECONDS même si <8 mots."""
+    await asyncio.sleep(MAX_WAIT_SECONDS)
+    if _acc_text:
+        logger.info(f"[ACC] timeout {MAX_WAIT_SECONDS}s → flush ({len(_acc_text.split())} mots)")
+        await _flush_accumulator()
+
+
+async def _flush_accumulator():
+    """Prend le texte accumulé, vide le buffer, lance la traduction en tâche de fond."""
+    global _acc_text, _acc_timer
+
+    text = _acc_text
+    _acc_text = ""
+
+    # Annuler le timer si actif
+    if _acc_timer is not None:
+        _acc_timer.cancel()
+        _acc_timer = None
+
+    if not text:
+        return
 
     langues_connectees = list({info["lang"] for info in clients.values()})
     if not langues_connectees:
         logger.debug("[PIPELINE] Aucun fidèle connecté — pas de traduction")
         return
 
+    logger.info(f'[PIPELINE] Traduction lancée: "{text[:80]}" ({len(text.split())} mots)')
+
+    # Lancer la traduction en tâche de fond (NON-BLOQUANT)
+    asyncio.create_task(_process_translation(text, langues_connectees))
+
+
+async def _process_translation(text: str, langues_connectees: list[str]):
+    """
+    Traduit le texte accumulé → TTS → broadcast aux fidèles.
+    Tourne en tâche de fond, ne bloque jamais Deepgram.
+    """
     # Callback 1 : token-par-token → broadcast "partial_translation"
     async def on_partial_token(lang: str, texte_accumule: str):
         await broadcast_translation("partial_translation", lang, text=texte_accumule)
@@ -249,7 +323,8 @@ async def audio_stream_websocket(websocket: WebSocket, token: str = Query(defaul
 
     stt = DeepgramSession(
         on_partial=on_partial_transcript,
-        on_final=on_final_transcript,
+        on_final=on_segment,
+        on_speech_final=on_speech_final_handler,
     )
 
     # Phase 1 : Attendre le PREMIER frame audio (sans timeout — le micro peut mettre du temps à s'ouvrir)

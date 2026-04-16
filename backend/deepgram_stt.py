@@ -45,9 +45,11 @@ class DeepgramSession:
         self,
         on_partial: Callable[[str], Awaitable[None]],
         on_final: Callable[[str], Awaitable[None]],
+        on_speech_final: Callable[[str], Awaitable[None]] | None = None,
     ):
         self._on_partial = on_partial
         self._on_final = on_final
+        self._on_speech_final = on_speech_final
         self._ws = None
         self._receiver_task = None
         self._keepalive_task = None
@@ -162,8 +164,12 @@ class DeepgramSession:
                         continue
 
                     is_final = data.get("is_final", False)
+                    speech_final = data.get("speech_final", False)
 
-                    if is_final:
+                    if is_final and speech_final and self._on_speech_final:
+                        logger.info(f'[DEEPGRAM SPEECH_FINAL] "{transcript[:80]}"')
+                        await self._on_speech_final(transcript)
+                    elif is_final:
                         logger.info(f'[DEEPGRAM FINAL] "{transcript[:80]}"')
                         await self._on_final(transcript)
                     else:

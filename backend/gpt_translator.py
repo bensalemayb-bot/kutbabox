@@ -193,6 +193,7 @@ def _build_system_prompt(
         f"جهاد→jihad, توحيد→tawhid, شهادة→shahada, تقوى→taqwa, سنة→sunna.\n"
         f"8. FORMAT TTS : pas de parenthèses explicatives, pas d'abréviations, pas de sigles. "
         f"Tout en toutes lettres, comme à voix haute.\n"
+        f"9. Écris TOUS les nombres en toutes lettres (« huit milliards » pas « 8 milliards »).\n"
         f"{glossaire_section}{contexte_section}\n"
         f"EXEMPLES (style attendu, à adapter à {lang_nom}) :\n"
         f"Arabe : الحمد لله رب العالمين\n"

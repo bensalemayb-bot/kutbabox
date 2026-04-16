@@ -1,5 +1,5 @@
 # KhutbaBox — Guide pour Claude Code
-> Dernière mise à jour : 2026-04-11
+> Dernière mise à jour : 2026-04-16
 
 ## C'est quoi ce projet
 Système de traduction en temps réel des sermons de mosquée.
@@ -49,7 +49,7 @@ Dashboard admin (admin.html) ◄── Téléphone du responsable
 | Composant | Technologie | Rôle |
 |-----------|------------|------|
 | STT | Deepgram Nova-3 | Transcription arabe streaming (~300ms, 17 dialectes) |
-| Traduction | GPT-4.1 mini | 8 langues en 1 appel, glossaire termes détectés (~400ms) |
+| Traduction | GPT-4.1 mini | 1 appel par langue en parallèle, glossaire termes détectés (~1s) |
 | TTS 5 langues | ElevenLabs Flash v2.5 | fr, en, es, pt, tr (~75ms) |
 | TTS 3 langues | Azure Neural TTS | ur, bs, sq (~200ms) |
 | Backend | Python + FastAPI | Orchestre tout le pipeline |
@@ -63,27 +63,37 @@ Dashboard admin (admin.html) ◄── Téléphone du responsable
 - ~~OpenAI Whisper (fallback STT)~~ → supprimé
 - ~~Google Gemini Flash (fallback traduction)~~ → supprimé
 
-## Pipeline détaillé d'une phrase
+## Pipeline détaillé (v3 avec accumulateur — 2026-04-16)
 
 ```
 1. L'imam parle → le mixer capte le son
 2. Raspberry Pi envoie l'audio au VPS (WebSocket, chunks 100ms, PCM 16kHz 16-bit mono)
 3. Backend pousse l'audio dans Deepgram Nova-3 (streaming)
 4. Deepgram renvoie le texte partiel → broadcast "partial" aux fidèles connectés
-5. Deepgram renvoie la phrase complète en arabe
-6. Backend scanne le glossaire → trouve les termes religieux dans la phrase
-7. Backend envoie à GPT-4.1 mini (1 seul appel) :
-   - La phrase arabe + les termes détectés du glossaire
-   - Demande traduction uniquement dans les langues où des fidèles sont connectés
-8. GPT répond en JSON avec les traductions
-9. Backend broadcast "final_text" aux fidèles (texte affiché immédiatement)
-10. Backend lance TTS en parallèle (seulement les langues connectées) :
-    - ElevenLabs Flash v2.5 pour fr, en, es, pt, tr
-    - Azure Neural TTS pour ur, bs, sq
-11. Backend broadcast "audio_chunk" aux fidèles (audio joué)
+5. Deepgram renvoie des segments "is_final" (3-5 mots chacun)
+6. L'ACCUMULATEUR accumule les segments dans un buffer
+7. Le buffer est traduit quand :
+   - Il atteint 8 mots (WORD_THRESHOLD) → phrase assez longue pour bien traduire
+   - OU l'imam fait une pause → Deepgram envoie "speech_final" → flush immédiat
+   - OU 4 secondes se sont écoulées (MAX_WAIT_SECONDS) → timer de sécurité
+8. La traduction est lancée en TÂCHE DE FOND (asyncio.create_task) → ne bloque JAMAIS Deepgram
+9. Backend scanne le glossaire → trouve les termes religieux dans la phrase accumulée
+10. Backend envoie à GPT-4.1 mini (1 appel par langue en parallèle, streaming token par token) :
+    - La phrase arabe + les termes détectés du glossaire + contexte des 3 dernières phrases
+    - Traduit uniquement dans les langues où des fidèles sont connectés
+11. Dès qu'une langue est finie → texte final + TTS en parallèle
+12. TTS (ElevenLabs Flash ou Azure Neural) → broadcast "audio_chunk" aux fidèles
 
-Latence totale estimée : ~800ms à 1.2 seconde
+Latence stable : ~3-4s par bloc (accumulation 2-3s + GPT ~1s + TTS ~0.3s)
+Pas de retard qui s'accumule grâce au traitement non-bloquant.
 ```
+
+### Optimisations de performance (2026-04-16)
+- **Buffer audio réduit** : 10 frames (~1s) au lieu de 31 (~3.1s) au démarrage
+- **GPT warmup** : mini appel GPT au démarrage pour préchauffer la connexion HTTPS/TLS
+- **GPT keepalive** : warmup toutes les 30s d'inactivité pour éviter le cold start après un silence
+- **Client HTTP persistant** : un seul httpx.AsyncClient réutilisé pour ElevenLabs (pas de nouvelle connexion TLS par phrase)
+- **Chiffres en toutes lettres** : règle 9 dans le prompt GPT ("huit milliards" pas "8 milliards")
 
 ## Clés API nécessaires (dans le fichier .env)
 - DEEPGRAM_API_KEY : pour Deepgram Nova-3 (STT arabe streaming)
@@ -191,32 +201,36 @@ azure-cognitiveservices-speech>=1.40.0
 
 ## Décisions d'architecture clés (avril 2026)
 1. **Audio passe toujours par le backend** — les clés API ne quittent jamais le VPS (sécurité)
-2. **Un seul appel GPT pour toutes les langues** — moins cher, presque aussi rapide que 8 appels séparés
+2. **1 appel GPT par langue en parallèle** — streaming token par token, chaque langue indépendante
 3. **Glossaire scanné par phrase** — on injecte seulement les termes détectés (pas les 408 à chaque fois)
 4. **TTS seulement pour les langues connectées** — pas de TTS gaspillé si personne n'écoute en turc
 5. **Frontend inchangé** — même interface, même protocole WebSocket
 6. **Une mosquée par VPS pour le MVP** — multi-mosquée plus tard
 7. **Dashboard admin web + PIN** — pas d'app mobile dédiée
+8. **Accumulateur de segments** — Deepgram envoie des petits bouts (3-5 mots), on accumule ~8 mots avant de traduire pour que GPT ait assez de contexte
+9. **Traduction non-bloquante** — asyncio.create_task au lieu de bloquer la réception Deepgram, élimine le retard qui s'accumule
+10. **Deepgram reste le meilleur choix STT** — Azure Speech Translation trop lent (3-5s), Palabra trop cher (3-4x), Meta SeamlessStreaming licence non-commerciale
 
 ## Roadmap v3
 
 ### Déjà fait ✅
 - Frontend index.html (page fidèles PWA)
 - Frontend admin.html (dashboard admin)
-- scripts/audio_capture.py (capture micro streaming WebSocket)
+- scripts/audio_capture.py (capture micro Windows → WebSocket)
 - backend/glossary.json (408 termes religieux, 8 langues)
 - Docker Compose configuré
-- Design v3 validé (brainstorming 2026-04-11)
+- Backend v3 découpé (main.py, deepgram_stt.py, gpt_translator.py, tts_engine.py)
+- Deepgram Nova-3 intégré (STT arabe streaming, WebSocket brut sans SDK)
+- GPT-4.1 mini intégré (traduction parallèle streaming + scan glossaire)
+- TTS hybride intégré (ElevenLabs Flash + Azure Neural)
+- Phase 1 perf : buffer réduit + GPT warmup + keepalive (2026-04-16)
+- Phase 2 perf : accumulateur 8 mots + traduction non-bloquante + speech_final + chiffres en lettres + client HTTP persistant (2026-04-16)
 
-### À faire — Migration v3
-- Réécrire backend en fichiers découpés (main.py, deepgram_stt.py, gpt_translator.py, tts_engine.py)
-- Intégrer Deepgram Nova-3 (STT arabe streaming)
-- Intégrer GPT-4.1 mini (traduction + scan glossaire)
-- Garder TTS hybride (ElevenLabs + Azure Neural) avec parallélisation
-- Ajouter boutons Coran/Adhan dans admin.html
-- Ajouter message "status" WebSocket pour Coran/Adhan côté fidèles
+### À faire — Tests et déploiement
+- Tester Phase 2 pendant 10+ minutes (vérifier que le retard ne s'accumule plus)
+- Ajouter boutons Coran/Adhan dans admin.html + message "status" WebSocket
 - Générer QR code pour l'URL de la mosquée
-- Tester bout en bout (micro → traduction → audio sur téléphone)
+- Tester bout en bout avec vrai micro (pas YouTube sur laptop)
 - Déployer sur VPS
 
 ### Phases futures (hors MVP)
@@ -224,3 +238,4 @@ azure-cognitiveservices-speech>=1.40.0
 - Détection automatique Coran / Adhan (remplace bouton manuel)
 - Dashboard admin avancé (stats latence, historique, nombre fidèles)
 - Formules pricing (Vendredi seul / Quotidien / Pro)
+- Évaluer Soniox (STT + traduction en un seul flux streaming) comme alternative future

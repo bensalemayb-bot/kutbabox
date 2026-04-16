@@ -36,12 +36,34 @@ LANGUES = {
 # ── Client OpenAI ──
 
 _client: AsyncOpenAI | None = None
+_last_gpt_call: float = 0.0  # Timestamp du dernier appel GPT (pour keepalive)
 
 
 def init_translator():
     """Initialise le client OpenAI. Appeler une fois au démarrage."""
     global _client
     _client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+
+
+async def warmup():
+    """
+    Envoie un mini appel GPT pour préchauffer la connexion HTTPS/TLS.
+    Appeler au démarrage + périodiquement pendant les silences.
+    Ne doit jamais crasher le backend.
+    """
+    global _last_gpt_call
+    try:
+        debut = time.time()
+        await _client.chat.completions.create(
+            model=GPT_MODEL,
+            messages=[{"role": "user", "content": "test"}],
+            max_tokens=1,
+        )
+        latence = int((time.time() - debut) * 1000)
+        _last_gpt_call = time.time()
+        logger.info(f"[GPT] Warmup OK ({latence}ms)")
+    except Exception as e:
+        logger.warning(f"[GPT] Warmup échoué (non bloquant) : {e}")
 
 
 # ── Glossaire ──
@@ -297,6 +319,9 @@ async def traduire(
         lang, texte = res
         if texte:
             traductions[lang] = texte
+
+    global _last_gpt_call
+    _last_gpt_call = time.time()
 
     latence = int((time.time() - debut) * 1000)
     n_success = len(traductions)

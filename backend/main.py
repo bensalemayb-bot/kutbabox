@@ -8,6 +8,7 @@ import json
 import base64
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 from collections import deque
 from pathlib import Path
@@ -19,7 +20,8 @@ import uvicorn
 
 # Modules KhutbaBox
 from deepgram_stt import DeepgramSession
-from gpt_translator import init_translator, charger_glossaire, traduire
+import gpt_translator
+from gpt_translator import init_translator, charger_glossaire, traduire, warmup
 from tts_engine import init_tts, generer_tts
 
 # ── Logger ──
@@ -261,7 +263,7 @@ async def audio_stream_websocket(websocket: WebSocket, token: str = Query(defaul
 
     buffer = [first_frame]
     try:
-        for _ in range(30):  # ~3 secondes de buffer supplémentaire
+        for _ in range(9):  # ~1 seconde de buffer (réduit de 30 pour gagner ~2s au démarrage)
             data = await asyncio.wait_for(websocket.receive_bytes(), timeout=0.15)
             if data and len(data) <= MAX_WS_MESSAGE_BYTES:
                 buffer.append(data)
@@ -374,6 +376,18 @@ async def health_check():
 # DÉMARRAGE
 # ============================================================
 
+async def _keepalive_gpt_loop():
+    """Garde la connexion GPT chaude en envoyant un warmup toutes les ~30s d'inactivité."""
+    while True:
+        await asyncio.sleep(10)
+        if not session["active"]:
+            continue
+        depuis_dernier = time.time() - gpt_translator._last_gpt_call
+        if depuis_dernier > 30:
+            logger.debug("[KEEPALIVE] Connexion GPT inactive >30s — warmup...")
+            await warmup()
+
+
 @app.on_event("startup")
 async def on_startup():
     """Initialise tous les modules au démarrage."""
@@ -387,6 +401,12 @@ async def on_startup():
         charger_glossaire(str(glossaire_path))
     else:
         logger.warning("glossary.json introuvable — traduction sans glossaire")
+
+    # Préchauffer la connexion GPT (évite le cold start de ~5s sur la 1ère phrase)
+    await warmup()
+
+    # Lancer la boucle keepalive GPT en tâche de fond
+    asyncio.create_task(_keepalive_gpt_loop())
 
     logger.info(f"KhutbaBox v3 démarré — {MOSQUE_NAME}")
     logger.info(f"Langues : {', '.join(LANGUES.keys())} ({len(LANGUES)} langues)")

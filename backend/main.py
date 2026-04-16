@@ -106,8 +106,8 @@ async def broadcast_status(mode: str):
 # Accumulateur : accumule les segments Deepgram avant de traduire
 _acc_text: str = ""
 _acc_timer: asyncio.Task | None = None
-WORD_THRESHOLD = 8    # Nombre de mots minimum avant de traduire
-MAX_WAIT_SECONDS = 4  # Temps max d'attente même si <8 mots
+WORD_THRESHOLD = 5    # Nombre de mots minimum avant de traduire
+MAX_WAIT_SECONDS = 2  # Temps max d'attente même si <5 mots
 
 
 async def on_partial_transcript(text: str):
@@ -327,33 +327,11 @@ async def audio_stream_websocket(websocket: WebSocket, token: str = Query(defaul
         on_speech_final=on_speech_final_handler,
     )
 
-    # Phase 1 : Attendre le PREMIER frame audio (sans timeout — le micro peut mettre du temps à s'ouvrir)
-    # Puis buffer quelques frames supplémentaires
-    # Comme ça Deepgram reçoit de l'audio immédiatement après connexion (pas de timeout)
-    try:
-        first_frame = await websocket.receive_bytes()
-    except WebSocketDisconnect:
-        logger.info("[WS AUDIO] Source audio déconnectée avant le premier frame")
-        return
+    # Connecter Deepgram IMMÉDIATEMENT (pas de buffer — le keepalive empêche le timeout)
+    await stt.start()
+    logger.info("[WS AUDIO] Deepgram connecté immédiatement — en attente d'audio")
 
-    buffer = [first_frame]
-    try:
-        for _ in range(9):  # ~1 seconde de buffer (réduit de 30 pour gagner ~2s au démarrage)
-            data = await asyncio.wait_for(websocket.receive_bytes(), timeout=0.15)
-            if data and len(data) <= MAX_WS_MESSAGE_BYTES:
-                buffer.append(data)
-    except asyncio.TimeoutError:
-        pass
-    except WebSocketDisconnect:
-        logger.info("[WS AUDIO] Source audio déconnectée pendant le buffer")
-        return
-
-    logger.info(f"[WS AUDIO] {len(buffer)} frames bufferises, connexion Deepgram...")
-
-    # Phase 2 : Connecter Deepgram et envoyer le buffer d'un coup
-    await stt.start(initial_frames=buffer)
-
-    # Phase 3 : Continuer en temps réel
+    # Envoyer l'audio en temps réel dès qu'il arrive
     try:
         while True:
             data = await websocket.receive_bytes()
